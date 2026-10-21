@@ -1,0 +1,20 @@
+{
+  "name": "energy-pet",
+  "version": "1.0.0",
+  "description": "桌面精力宠物 — 事件溯源驱动的 Electron 桌面伴侣",
+  "main": "dist/main/index.js",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:tests": "node scripts/build-tests.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:tests && node --test dist-tests/*.mjs",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --dev"
+  },
+  "devDependencies": {
+    "electron": "^44.9.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

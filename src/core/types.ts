@@ -1,0 +1,273 @@
+/**
+ * 领域类型定义 —— 全局唯一契约。
+ * 所有模块共享，禁止在此处放置行为逻辑。
+ */
+
+/* ─────────────────────────── 精力 ─────────────────────────── */
+
+/** 精力值范围 0–10（浮点，两位精度） */
+export const ENERGY_MIN = 0;
+export const ENERGY_MAX = 10;
+
+/* ─────────────────────────── 天气 ─────────────────────────── */
+
+/** 归一化天气语义（WeatherSensor 输出，屏蔽上游 API 差异） */
+export type WeatherCondition = 'sunny' | 'cloudy' | 'rain' | 'thunderstorm';
+
+export interface WeatherState {
+  condition: WeatherCondition;
+  /** 摄氏度 */
+  tempC: number;
+  /** 数据来源，用于降级标注 */
+  source: 'live' | 'cache' | 'fallback';
+  /** 获取时间戳（ms） */
+  at: number;
+}
+
+export const FALLBACK_WEATHER: WeatherState = {
+  condition: 'cloudy',
+  tempC: 20,
+  source: 'fallback',
+  at: 0,
+};
+
+/* ─────────────────────────── 情绪 ─────────────────────────── */
+
+/** 10 档 base 情绪（由精力值映射） */
+export type BaseEmotion =
+  | 'blissful'   // 9.5–10
+  | 'radiant'    // 8.5–9.4
+  | 'cheerful'   // 7.5–8.4
+  | 'content'    // 6.5–7.4
+  | 'calm'       // 5.5–6.4
+  | 'steady'     // 4.5–5.4
+  | 'weary'      // 3.5–4.4
+  | 'drained'    // 2.5–3.4
+  | 'exhausted'  // 1.5–2.4
+  | 'burnt';     // 0–1.4
+
+/** 天气 overlay 精灵（独立图层，不进状态机） */
+export type WeatherOverlay =
+  | 'none'
+  | 'sunbeam'    // 晴：头顶小太阳 + 光斑
+  | 'cloud-puff' // 阴：头顶云朵
+  | 'rain-drop'  // 雨：头顶乌云 + 雨丝
+  | 'storm-bolt';// 雷阵雨：乌云 + 闪电
+
+/** pulse 层情绪反应（<6 分激活） */
+export type PulseReaction =
+  | 'none'
+  | 'anxious'      // 连续拒绝恢复
+  | 'guilty'       // 任务超时未完成
+  | 'numb'         // 长时间无事件
+  | 'restless'     // 高频小幅调整
+  | 'grateful'     // 刚完成恢复且效果超预期
+  | 'determined';  // 刚完成恢复且达标
+
+export interface EmotionState {
+  energy: number;
+  base: BaseEmotion;
+  overlay: WeatherOverlay;
+  pulse: PulseReaction;
+  /** 天气×精力复合修正后的最终表情标签，供渲染层查精灵图 */
+  composite: string;
+  /** 供 UI 展示的一句话状态 */
+  headline: string;
+  /** pulse 是否激活 */
+  pulseActive: boolean;
+}
+
+/* ─────────────────────────── 任务 ─────────────────────────── */
+
+export type TaskStatus = 'open' | 'done' | 'dropped';
+
+export interface Task {
+  id: string;
+  title: string;
+  /** 预估精力消耗（正数表示扣减） */
+  estCost: number;
+  /** 预估时长（分钟）。旧事件流缺该字段时归一化为 0 */
+  estMinutes: number;
+  status: TaskStatus;
+  createdAt: number;
+  /** 计划完成截止（ms），用于超时判定 */
+  dueAt: number | null;
+  /** 用户确认的实际时长（分钟）；完成后写入，未完成为 null */
+  actualMinutes: number | null;
+}
+
+/**
+ * 任务流程第一步的返回载荷：面板展示「任务名称 + 预估时长」，
+ * 等用户确认实际时长后，才允许进入精力调节流程（第二步）。
+ */
+export interface TaskDurationRequest {
+  taskId: string;
+  title: string;
+  /** 预估时长（分钟），0 表示创建时未设定 */
+  estMinutes: number;
+  estCost: number;
+  createdAt: number;
+}
+
+/* ─────────────────────────── 恢复项 ─────────────────────────── */
+
+export interface RecoveryItem {
+  id: string;
+  name: string;
+  icon: string;
+  /** 默认预估恢复值（会被版本历史覆盖） */
+  defaultDelta: number;
+  /** 当前生效的预估值（来自版本历史最新一条） */
+  currentDelta: number;
+  /** 建议时长（分钟），用于「3 分钟滑动确认」默认窗口 */
+  minutes: number;
+}
+
+export interface RecoveryVersion {
+  id: number;
+  itemId: string;
+  delta: number;
+  /** 调整理由 */
+  reason: string;
+  createdAt: number;
+  /** 决策来源：system|user|ai（周报展示历史决策用） */
+  source: string;
+}
+
+/* ─────────────────────────── 洞察 ─────────────────────────── */
+
+export interface InsightRecommendation {
+  id: string;
+  itemId: string;
+  itemName: string;
+  predicted: number;
+  /** 实际均值 */
+  actual: number;
+  /** 偏差样本数 */
+  samples: number;
+  /** 建议文案 */
+  message: string;
+  suggestedDelta: number;
+  createdAt: number;
+}
+
+export interface WeeklyReport {
+  weekStart: number;
+  weekEnd: number;
+  avgEnergy: number;
+  minEnergy: number;
+  maxEnergy: number;
+  totalEvents: number;
+  tasksCompleted: number;
+  recoveriesTaken: number;
+  /** 每日收尾精力（用于折线） */
+  daily: { date: string; closeEnergy: number }[];
+  /** 最耗精力的时段 */
+  peakDrainHour: number | null;
+  /** 最有效的恢复项 */
+  bestRecovery: { name: string; avgDelta: number } | null;
+  narrative: string[];
+}
+
+/**
+ * 周报弹窗载荷（需求 5）：每天 17:30 弹一次（周五需确认）。
+ * 铅笔手绘清单 = 周报主体 + AI 推荐默认值 + 历史决策留痕。
+ */
+export interface WeeklyReportPayload {
+  report: WeeklyReport;
+  /** AI 记忆推荐：同一恢复项重复 3 次后产出的默认值校准建议（未处置） */
+  aiSuggestions: { itemId: string; itemName: string; suggestedDelta: number; message: string }[];
+  /** 近 7 天已确认的默认值变更（新→旧），source 标注决策来源 */
+  decisions: { itemId: string; itemName: string; delta: number; reason: string; source: string; createdAt: number }[];
+  /** 周五重点确认：弹窗不可随手关闭，必须点「已确认」 */
+  requireAck: boolean;
+  /** 本次弹窗对应的日期（YYYY-MM-DD，审计用） */
+  dateStr: string;
+}
+
+/* ─────────────────────────── 窗口 ─────────────────────────── */
+
+export type WindowMode = 'pet' | 'panel';
+
+/**
+ * 精力调节窗口 —— 「完成一个事件后」才存在的临时可写状态。
+ *
+ * 生命周期：
+ *   open(事件确认) → adjusting（7s 内可反复微调，每次微调重置计时）
+ *                  → confirming（计时到点，等用户在弹窗里确认）
+ *                  → 写入事件流 / 丢弃
+ *
+ * 与之相对：没有窗口时，进度条拖动是纯预览，松手回弹，永不落库。
+ */
+export type AdjustPhase = 'adjusting' | 'confirming';
+
+export interface AdjustWindow {
+  /** 触发本次调节的事件类型 */
+  kind: 'task-complete' | 'recovery';
+  refId: string;
+  /** 事件名称（任务标题 / 恢复项名） */
+  label: string;
+  icon: string;
+  /** 事件前的真实精力 */
+  baseEnergy: number;
+  /** 该事件的默认精力变化量（predicted） */
+  predicted: number;
+  /** 该事件的默认精力值 = clamp(baseEnergy + predicted) */
+  defaultEnergy: number;
+  /** 当前草稿精力（用户调节后的值，未落库） */
+  draftEnergy: number;
+  /** 用户确认的实际时长（分钟）；恢复项取其固定时长 */
+  actualMinutes: number | null;
+  phase: AdjustPhase;
+  /** adjusting 阶段的剩余毫秒；confirming 阶段为 0 */
+  remainingMs: number;
+  openedAt: number;
+  expiresAt: number;
+}
+
+export interface AppState {
+  energy: number;
+  emotion: EmotionState;
+  weather: WeatherState;
+  tasks: Task[];
+  recoveries: RecoveryItem[];
+  /** 是否展示晨间基线滑动（开机后首次） */
+  morningBaselinePending: boolean;
+  /** 待确认的滑动卡片（晨间基线） */
+  pendingSlide: PendingSlide | null;
+  /** 事件后的精力调节窗口（null = 进度条只读预览） */
+  adjustWindow: AdjustWindow | null;
+  /** AI 推荐卡片队列 */
+  recommendations: InsightRecommendation[];
+  /** 周报弹窗（每天 17:30 弹一次；周五 requireAck 需确认；null = 不显示） */
+  reportModal: WeeklyReportPayload | null;
+  mode: WindowMode;
+  lastUpdated: number;
+}
+
+export type SlideKind = 'task-complete' | 'recovery' | 'morning-baseline' | 'manual-adjust';
+
+export interface PendingSlide {
+  kind: SlideKind;
+  /** 关联对象 id（taskId / recoveryId / 'baseline' / 'manual'） */
+  refId: string;
+  title: string;
+  subtitle: string;
+  /**
+   * 事件默认变化量 —— 仅作参考展示与滑块默认位置来源。
+   * 滑块默认位置 = clamp(baseEnergy + predicted, min, max)。
+   */
+  predicted: number;
+  /** 滑块范围（绝对精力值，通常 0–ENERGY_MAX） */
+  min: number;
+  max: number;
+  /** 允许的最大绝对值（= ENERGY_MAX，保留字段） */
+  absMax: number;
+  /**
+   * 基准精力：卡片弹出时的真实精力值（事件前）。
+   * 确认时 actual_delta = 用户滑到的目标精力 - baseEnergy，
+   * 即「以用户当前真实精力为准，事件消耗只是参考」。
+   */
+  baseEnergy: number;
+  createdAt: number;
+}
