@@ -252,3 +252,45 @@ test('R7: pulse 不得触碰 hue/sat/lum/breath/bounce/blink/squish（只走三�
     }
   }
 });
+
+/* ─────────────────── 钳制：全组合穷举 ─────────────────── */
+
+/**
+ * 上方三条钳制断言各只抽查一个组合（mouthCurve 的 burnt+负偏移、tremble 的
+ * burnt+restless、eyeOpen 的 burnt+numb）。抽查能抓到当前这版数值的越界，
+ * 但抓不到「换数值后某个没被抽到的组合」—— 而越界在渲染层的表现不是崩溃，
+ * 是几何走形（负眼皮、反向嘴型、抖动到散架），截图很难一眼看出。
+ *
+ * 所以这里把全部 base × pulse × energy 穷举一遍。energy 从 **-1** 起扫：
+ * BASE_TIERS 的 burnt 档 min = -1，契约层注释也明写「else 分支覆盖 0–3
+ * 以及越界负值」，而其余测试的 energy 循环都是 0–10，负值边界一直没人守。
+ * 步长 0.5 与精力写入的精度一致（step=0.5 的浮点档是高频取值）。
+ */
+test('钳制: 全组合穷举 —— 10 base × 全部 pulse × energy -1~10（步长 0.5）', () => {
+  const bases = [
+    'blissful', 'radiant', 'cheerful', 'content', 'calm',
+    'steady', 'weary', 'drained', 'exhausted', 'burnt',
+  ] as const;
+  const RANGE = {
+    eyeOpen: [0, 1],
+    mouthCurve: [-1, 1],
+    tremble: [0, 0.9],
+  } as const;
+  const channels = ['eyeOpen', 'mouthCurve', 'tremble'] as const;
+  const pulses = Object.keys(PULSE_OFFSETS) as PulseReaction[];
+
+  for (const base of bases) {
+    for (const pulse of pulses) {
+      for (let energy = -1; energy <= 10; energy += 0.5) {
+        const p = buildRenderParams(energy, base, pulse, true);
+        for (const ch of channels) {
+          const [lo, hi] = RANGE[ch];
+          assert.ok(
+            p[ch] >= lo - 1e-9 && p[ch] <= hi + 1e-9,
+            `${base}/${pulse}/energy=${energy}: ${ch}=${p[ch]} 越出 [${lo}, ${hi}]`,
+          );
+        }
+      }
+    }
+  }
+});
