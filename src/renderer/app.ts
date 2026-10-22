@@ -391,7 +391,7 @@ function setupDrag(): void {
     pet.dragEnd();
     if (treatAsClick && !moved) {
       // 没拖动 → 视为点击：压平 + 粒子；连点 = 抚摸（呼噜正向反馈）。
-      // 永不触发受伤——甩墙只能由 pet.injure() 显式调用（当前无调用方）。
+      // 永不触发跌倒——甩墙只能由 pet.pratfall() 显式调用（当前无调用方）。
       // DESIGN.md §5.3 / R10：用户的手永远只能得到正向反馈。
       pet.poke();
     }
