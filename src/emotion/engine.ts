@@ -29,20 +29,29 @@ export interface BaseTier {
   /** 主色调（渲染层用） */
   hue: number;
   sat: number;
+  /** 明度基线（渲染层 bodyGrad 的 lightness 锚点） */
+  lum: number;
 }
+
+/**
+ * 暖色相区间（R7 / DESIGN.md §3.1）。
+ * 低精力表达疲惫靠 sat + lum + 轮廓/眼/节律，**绝不靠色相漂到蓝紫**。
+ */
+export const WARM_HUE_MIN = 30;
+export const WARM_HUE_MAX = 46;
 
 /** 从高到低排列；查表时取第一个 energy >= min 的档（量程 0–10，每档 1 分） */
 export const BASE_TIERS: readonly BaseTier[] = [
-  { emotion: 'blissful',  min: 9.5, label: '狂喜', headline: '整个人都在发光！',       breath: 1.6, bounce: 7, blink: 5.5, hue: 46,  sat: 96 },
-  { emotion: 'radiant',   min: 8.5, label: '神采奕奕', headline: '状态拉满，随时开干',   breath: 2.0, bounce: 6, blink: 5.0, hue: 42,  sat: 94 },
-  { emotion: 'cheerful',  min: 7.5, label: '愉快', headline: '心情不错，节奏刚好',       breath: 2.4, bounce: 5, blink: 4.6, hue: 38,  sat: 92 },
-  { emotion: 'content',   min: 6.5, label: '满足', headline: '稳稳的，很舒服',           breath: 2.8, bounce: 4, blink: 4.2, hue: 34,  sat: 88 },
-  { emotion: 'calm',      min: 5.5, label: '平和', headline: '平静在线，不急不躁',       breath: 3.2, bounce: 3, blink: 4.0, hue: 168, sat: 62 },
-  { emotion: 'steady',    min: 4.5, label: '平稳', headline: '正常续航中',               breath: 3.6, bounce: 2.5, blink: 3.8, hue: 190, sat: 52 },
-  { emotion: 'weary',     min: 3.5, label: '有点累', headline: '电量开始报警了',         breath: 4.2, bounce: 2, blink: 3.4, hue: 210, sat: 44 },
-  { emotion: 'drained',   min: 2.5, label: '透支', headline: '需要喘口气…',              breath: 4.8, bounce: 1.5, blink: 3.0, hue: 246, sat: 38 },
-  { emotion: 'exhausted', min: 1.5, label: '疲惫', headline: '快撑不住了，请救救我',     breath: 5.6, bounce: 1, blink: 2.6, hue: 268, sat: 32 },
-  { emotion: 'burnt',     min: -1,  label: '枯竭', headline: '已关机边缘…',              breath: 6.5, bounce: 0.5, blink: 2.2, hue: 288, sat: 24 },
+  { emotion: 'blissful',  min: 9.5, label: '狂喜', headline: '整个人都在发光！',       breath: 1.6, bounce: 7, blink: 5.5, hue: 46, sat: 96, lum: 80 },
+  { emotion: 'radiant',   min: 8.5, label: '神采奕奕', headline: '状态拉满，随时开干',   breath: 2.0, bounce: 6, blink: 5.0, hue: 44, sat: 94, lum: 78 },
+  { emotion: 'cheerful',  min: 7.5, label: '愉快', headline: '心情不错，节奏刚好',       breath: 2.4, bounce: 5, blink: 4.6, hue: 42, sat: 92, lum: 76 },
+  { emotion: 'content',   min: 6.5, label: '满足', headline: '稳稳的，很舒服',           breath: 2.8, bounce: 4, blink: 4.2, hue: 40, sat: 88, lum: 74 },
+  { emotion: 'calm',      min: 5.5, label: '平和', headline: '平静在线，不急不躁',       breath: 3.2, bounce: 3, blink: 4.0, hue: 38, sat: 78, lum: 72 },
+  { emotion: 'steady',    min: 4.5, label: '平稳', headline: '正常续航中',               breath: 3.6, bounce: 2.5, blink: 3.8, hue: 37, sat: 66, lum: 70 },
+  { emotion: 'weary',     min: 3.5, label: '有点累', headline: '电量开始报警了',         breath: 4.2, bounce: 2, blink: 3.4, hue: 36, sat: 54, lum: 67 },
+  { emotion: 'drained',   min: 2.5, label: '透支', headline: '需要喘口气…',              breath: 4.8, bounce: 1.5, blink: 3.0, hue: 35, sat: 42, lum: 63 },
+  { emotion: 'exhausted', min: 1.5, label: '疲惫', headline: '快撑不住了，请救救我',     breath: 5.6, bounce: 1, blink: 2.6, hue: 34, sat: 32, lum: 58 },
+  { emotion: 'burnt',     min: -1,  label: '枯竭', headline: '已关机边缘…',              breath: 6.5, bounce: 0.5, blink: 2.2, hue: 33, sat: 24, lum: 52 },
 ] as const;
 
 /** pulse 激活阈值：精力 < 3 分（量程 0–10 的低电区） */
@@ -122,7 +131,9 @@ export function resolveWeatherOverlay(energy: number, condition: WeatherConditio
 
 /**
  * 精力分 3 档：high(>=6.5) / mid(3–6.4) / low(<3)
- * 值 = 复合表情后缀，渲染层用 `${base}__${suffix}` 查精灵/微调配色。
+ * 值 = 复合表情后缀，**仅供周报叙事与托盘 tooltip 查表**，渲染层禁止读它
+ * （DESIGN.md §4.4 / R6：composite 一旦驱动表情，天气就从共情层退化为评价层）。
+ *
  * 语义：同样下雨，精力高时是「惬意听雨」，精力低时是「雪上加霜」。
  * 量程 0–10：low 与 PULSE_THRESHOLD(3) 对齐，high 从「满足」档起步。
  */
@@ -132,16 +143,32 @@ export type CompositeModifier =
   | 'lifted'      // 心情被天气托了一把（更亮）
   | 'neutral'     // 无显著影响
   | 'cozy'        // 慵懒舒适（雨天+中高精力）
-  | 'heavy'       // 压抑（阴天+低精力）
+  | 'heavy'       // 压抑（阴天/晴天+低精力）
   | 'soaked'      // 雪上加霜（雨+低精力）
-  | 'startled'    // 惊扰（雷阵雨+低精力）
-  | 'charged';    // 被点燃（雷阵雨+高精力，反差兴奋）
+  | 'startled';   // 被雷声惊到（雷阵雨+低精力）
 
+/**
+ * thunderstorm × high 刻意取 neutral，**不得**再引入「反差兴奋」类修饰。
+ *
+ * 两个理由，缺一不可：
+ *
+ * 1. **语义冲突**。thunderstorm + 高精力在 overlay 层是「无特效」
+ *    （resolveWeatherOverlay：精力 >= 8 只显示好天气，坏天气一律 none）。
+ *    叙事层却给它编一个「被点燃」，等于同一组输入在两层得出相反结论。
+ *
+ * 2. **档位错配放大器**。energyBand 的 high 门槛是 6.5，而 overlay 的门槛是 8。
+ *    精力 7 + 雷阵雨 ⇒ 头顶挂着 storm-bolt（7 < 8），band 却是 high。
+ *    旧表在这一格给出 charged，于是周报会写「反而被点燃」，
+ *    而用户看到的是一只头顶乌云闪电的猫——图文互相打脸。
+ *
+ * 低精力侧的 startled（被雷声惊到）保留：它是「雷声把我吓了一跳」的
+ * 外部归因，不指向自我价值，符合 R4 的共情层原则。
+ */
 export const COMPOSITE_TABLE: Record<WeatherCondition, Record<EnergyBand, CompositeModifier>> = {
   sunny:        { high: 'lifted',   mid: 'neutral', low: 'heavy'    },
   cloudy:       { high: 'neutral',  mid: 'neutral', low: 'heavy'    },
   rain:         { high: 'cozy',     mid: 'cozy',    low: 'soaked'   },
-  thunderstorm: { high: 'charged',  mid: 'neutral', low: 'startled' },
+  thunderstorm: { high: 'neutral',  mid: 'neutral', low: 'startled' },
 };
 
 export function energyBand(energy: number): EnergyBand {
@@ -150,6 +177,10 @@ export function energyBand(energy: number): EnergyBand {
   return 'low';
 }
 
+/**
+ * 叙事词汇表（周报 / 托盘 tooltip 用）。
+ * 刻意不含任何「被点燃」类正向雷阵雨修饰，见 COMPOSITE_TABLE 注释。
+ */
 export const MODIFIER_LABEL: Record<CompositeModifier, string> = {
   lifted: '被阳光托着',
   neutral: '平常',
@@ -157,7 +188,6 @@ export const MODIFIER_LABEL: Record<CompositeModifier, string> = {
   heavy: '有点压抑',
   soaked: '雪上加霜',
   startled: '被雷声惊到',
-  charged: '反而被点燃',
 };
 
 /* ─────────────────────────── pulse：6 种日志信号 → 6 种情绪反应 ─────────────────────────── */

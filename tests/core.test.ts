@@ -18,12 +18,12 @@ import {
 } from '../src/core/events.js';
 import {
   resolve, tierFor, extractPulseSignals, resolvePulse, PULSE_RULES,
-  COMPOSITE_TABLE, energyBand, PULSE_THRESHOLD,
-  resolveWeatherOverlay, WEATHER_DISPLAY_ENERGY_MIN,
+  COMPOSITE_TABLE, MODIFIER_LABEL, energyBand, PULSE_THRESHOLD,
+  resolveWeatherOverlay, WEATHER_DISPLAY_ENERGY_MIN, describe,
 } from '../src/emotion/engine.js';
 import { TaskCenter } from '../src/task/center.js';
 import { RecoveryDeck, DEFAULT_ITEMS } from '../src/recovery/deck.js';
-import { InsightEngine, DEVIATION_SAMPLES_REQUIRED } from '../src/insight/engine.js';
+import { InsightEngine, DEVIATION_SAMPLES_REQUIRED, RECOMMEND_WINDOW_DAYS } from '../src/insight/engine.js';
 import { WeatherSensor, wmoToCondition } from '../src/weather/sensor.js';
 import type { RecoveryItem, WeatherState } from '../src/core/types.js';
 import { FALLBACK_WEATHER } from '../src/core/types.js';
@@ -191,11 +191,41 @@ test('emotion: 复合规则表 4×3 全覆盖', () => {
   assert.equal(COMPOSITE_TABLE.rain.high, 'cozy');
   assert.equal(COMPOSITE_TABLE.rain.low, 'soaked');
   assert.equal(COMPOSITE_TABLE.thunderstorm.low, 'startled');
-  assert.equal(COMPOSITE_TABLE.thunderstorm.high, 'charged');
   assert.equal(COMPOSITE_TABLE.sunny.high, 'lifted');
   assert.equal(energyBand(6.5), 'high');
   assert.equal(energyBand(3), 'mid');
   assert.equal(energyBand(2.9), 'low');
+});
+
+/**
+ * thunderstorm × high 必须是 neutral —— 不得再出现「反差兴奋」类修饰。
+ *
+ * 守护两条：① charged 已从词汇表删除；② overlay 层与 composite 层不打架
+ * （精力 7 + 雷阵雨：头顶挂 storm-bolt，叙事层绝不能同时说「被点燃」）。
+ */
+test('emotion: 雷阵雨+高精力 无正向修饰（charged 已废除，两层不打架）', () => {
+  assert.equal(COMPOSITE_TABLE.thunderstorm.high, 'neutral');
+  assert.ok(!('charged' in MODIFIER_LABEL), 'charged 不得留在叙事词汇表里');
+  assert.ok(!('charged' in COMPOSITE_TABLE.thunderstorm));
+
+  // 档位错配放大器：energyBand.high 门槛 6.5 < overlay 门槛 8
+  // ⇒ 精力 7 时头顶有 storm-bolt，叙事层必须沉默
+  const storm: WeatherState = { condition: 'thunderstorm', tempC: 16, source: 'live', at: 0 };
+  const s7 = resolve({ energy: 7, weather: storm, events: [] });
+  assert.equal(s7.overlay, 'storm-bolt');
+  assert.equal(energyBand(7), 'high');
+  assert.equal(s7.composite, 'content'); // 无修饰后缀 → 只有 base（7 落 content 档）
+  assert.equal(describe(s7, storm), '满足 · 雷阵雨'); // 无「反而被点燃」
+
+  // 精力 9（>=8）时 overlay 归 none，叙事层同样沉默
+  const s9 = resolve({ energy: 9, weather: storm, events: [] });
+  assert.equal(s9.overlay, 'none');
+  assert.equal(s9.composite, 'radiant');
+
+  // 低精力侧的 startled 保留（外部归因，不指向自我价值）
+  const s2 = resolve({ energy: 2, weather: storm, events: [] });
+  assert.equal(s2.overlay, 'storm-bolt');
+  assert.ok(s2.composite.startsWith('exhausted__startled'));
 });
 
 test('emotion: 同精力不同天气 → composite 不同', () => {
@@ -353,6 +383,176 @@ test('insight: 同恢复项 ≥3 次偏差 → 产出推荐；<3 次不产出', 
     assert.ok(ok);
     assert.equal(ok!.newDelta, recs[0]!.suggestedDelta);
     assert.equal(insight.pendingRecommendations().length, 0);
+  } finally { log.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+/* ── 推荐水位线：处置后旧证据作废（红线「拒绝零痕迹零情绪反馈」的技术落点） ── */
+
+/**
+ * 为什么必须冻结时钟：
+ * resolveRecommendation 用 Date.now() 写 resolved_at，事件用 Date.now() 写 at。
+ * 真实时钟下测试跑得快，两者可能同毫秒，导致「旧证据是否早于水位线」的断言不确定。
+ * 冻结后：旧事件 at === resolved_at（严格不大于 → 作废），tick 之后的新事件 at > 水位线（有效）。
+ */
+const DAY = 24 * 60 * 60 * 1000;
+
+test('insight: 拒绝后不再用同一批数据重弹（水位线）', (t) => {
+  const T = Date.parse('2026-10-01T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const { log, dir } = tmpLog();
+  try {
+    const insight = new InsightEngine({ log, now: () => Date.now() });
+    const item = mkItem('rec_walk', 2);
+
+    // 3 次调高偏差 → 触发推荐
+    for (let i = 0; i < 3; i++) log.append(recoveryTakenDraft(item, 4.5));
+    const recs = insight.detectRecommendations();
+    assert.equal(recs.length, 1);
+
+    // 用户拒绝
+    insight.resolveRecommendation(recs[0]!.id, 'rejected');
+    assert.equal(insight.pendingRecommendations().length, 0);
+
+    // 模拟之后 5 轮（每 10 分钟）批处理：同一批历史数据不得重弹
+    for (let round = 0; round < 5; round++) {
+      t.mock.timers.tick(10 * 60 * 1000);
+      assert.equal(insight.detectRecommendations().length, 0, `第 ${round + 1} 轮不应重弹`);
+    }
+  } finally { log.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('insight: 接受后不再重弹（旧 predicted_delta 不可变，默认值一改旧证据即失效）', (t) => {
+  const T = Date.parse('2026-10-01T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const { log, dir } = tmpLog();
+  try {
+    const insight = new InsightEngine({ log, now: () => Date.now() });
+    const deck = new RecoveryDeck(log);
+    deck.seedIfEmpty();
+    const nap = deck.get('rec_nap')!;
+
+    // 4 次午睡，实际只恢复 0.8（预估 1.5）→ 4 次调低
+    for (let i = 0; i < 4; i++) log.append(recoveryTakenDraft(nap, 0.8));
+    const recs = insight.detectRecommendations();
+    assert.equal(recs.length, 1);
+    assert.equal(recs[0]!.suggestedDelta, 0.8);
+
+    // 接受 → coordinator 会同步更新默认值
+    insight.resolveRecommendation(recs[0]!.id, 'accepted');
+    deck.updateDelta('rec_nap', 0.8, '采纳 AI 推荐校准', 'ai');
+    assert.equal(deck.get('rec_nap')!.currentDelta, 0.8);
+
+    // 之后 3 轮批处理不得重弹（否则会出现「建议改成 0.8」而当前已是 0.8 的同义反复）
+    for (let round = 0; round < 3; round++) {
+      t.mock.timers.tick(10 * 60 * 1000);
+      const again = insight.detectRecommendations();
+      assert.equal(again.length, 0, `第 ${round + 1} 轮不应重弹`);
+    }
+  } finally { log.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('insight: 水位线只切时间不永久封禁 —— 处置后新偏差可重新建议', (t) => {
+  const T = Date.parse('2026-10-01T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const { log, dir } = tmpLog();
+  try {
+    const insight = new InsightEngine({ log, now: () => Date.now() });
+    const item = mkItem('rec_walk', 2);
+
+    for (let i = 0; i < 3; i++) log.append(recoveryTakenDraft(item, 4.5));
+    const recs = insight.detectRecommendations();
+    insight.resolveRecommendation(recs[0]!.id, 'rejected');
+
+    // 拒绝后立刻检测：旧证据已作废，2 次不足
+    t.mock.timers.tick(1000);
+    log.append(recoveryTakenDraft(item, 4.5));
+    log.append(recoveryTakenDraft(item, 4.5));
+    assert.equal(insight.detectRecommendations().length, 0, '水位线后仅 2 次，不足 3');
+
+    // 第 3 次新偏差 → 可重新建议（用户习惯会变，系统必须能重新学习）
+    t.mock.timers.tick(1000);
+    log.append(recoveryTakenDraft(item, 4.5));
+    const again = insight.detectRecommendations();
+    assert.equal(again.length, 1, '水位线后满 3 次应重新建议');
+  } finally { log.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('insight: 14 天窗口外的陈旧样本不计入', (t) => {
+  const T = Date.parse('2026-10-15T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const { log, dir } = tmpLog();
+  try {
+    const insight = new InsightEngine({ log, now: () => Date.now() });
+    const item = mkItem('rec_walk', 2);
+
+    // 3 次偏差，但发生在 20 天前（窗口外）
+    const stale = T - 20 * DAY;
+    for (let i = 0; i < 3; i++) log.append({ ...recoveryTakenDraft(item, 4.5), at: stale });
+    assert.equal(insight.detectRecommendations().length, 0, '窗口外样本不应触发');
+
+    // 补 3 次窗口内的偏差 → 触发
+    for (let i = 0; i < 3; i++) log.append(recoveryTakenDraft(item, 4.5));
+    assert.equal(insight.detectRecommendations().length, 1);
+  } finally { log.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('insight: 证据计数按方向分组，message 含可回溯的因果叙事', () => {
+  const { log, dir } = tmpLog();
+  try {
+    const insight = new InsightEngine({ log });
+    const item = mkItem('rec_nap', 1.5);
+
+    // 4 次午睡：3 次调低（0.8）、1 次吻合（1.5）
+    log.append(recoveryTakenDraft(item, 0.8));
+    log.append(recoveryTakenDraft(item, 0.8));
+    log.append(recoveryTakenDraft(item, 0.8));
+    log.append(recoveryTakenDraft(item, 1.5));
+
+    const recs = insight.detectRecommendations();
+    assert.equal(recs.length, 1);
+    const ev = recs[0]!.evidence;
+    assert.equal(ev.total, 4, '总次数含吻合的那次');
+    assert.equal(ev.adjustedDown, 3);
+    assert.equal(ev.adjustedUp, 0);
+    assert.equal(ev.matched, 1);
+    assert.equal(ev.windowDays, RECOMMEND_WINDOW_DAYS);
+
+    // 因果叙事：用户能自己回溯那 4 次经历，而不是只看到一个统计结论
+    const msg = recs[0]!.message;
+    assert.ok(msg.includes('4 次'), '应含总次数');
+    assert.ok(msg.includes('3 次你把效果调低了'), '应含方向分组的证据计数');
+    assert.ok(!msg.includes('你总是'), '语气红线：不得含评价性措辞');
+
+    // pendingRecommendations 从 DB 回读时证据计数不能丢（周报渲染依赖）
+    const pending = insight.pendingRecommendations();
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]!.evidence.total, 4);
+    assert.equal(pending[0]!.evidence.adjustedDown, 3);
+  } finally { log.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('insight: 证据计数不受水位线影响（total 描述「你做过什么」，水位线决定「该不该建议」）', (t) => {
+  const T = Date.parse('2026-10-01T10:00:00Z');
+  t.mock.timers.enable({ apis: ['Date'], now: T });
+  const { log, dir } = tmpLog();
+  try {
+    const insight = new InsightEngine({ log, now: () => Date.now() });
+    const item = mkItem('rec_walk', 2);
+
+    for (let i = 0; i < 3; i++) log.append(recoveryTakenDraft(item, 4.5));
+    const recs = insight.detectRecommendations();
+    assert.equal(recs[0]!.evidence.total, 3);
+
+    insight.resolveRecommendation(recs[0]!.id, 'rejected');
+
+    // 拒绝后再来 3 次：total 应为 6（历史行为不该被拒绝抹掉），
+    // 而有效证据只有拒绝后的 3 条 → 恰好够重新触发
+    t.mock.timers.tick(60 * 1000);
+    for (let i = 0; i < 3; i++) log.append(recoveryTakenDraft(item, 4.5));
+    const again = insight.detectRecommendations();
+    assert.equal(again.length, 1);
+    assert.equal(again[0]!.evidence.total, 6, '总次数含拒绝前的历史');
+    assert.equal(again[0]!.samples, 3, '有效证据只算水位线之后');
   } finally { log.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 

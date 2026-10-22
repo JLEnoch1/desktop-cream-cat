@@ -103,10 +103,13 @@ export class PetRenderer {
     //   当前实现：三段相位机 fly(350ms) → hold(8000ms) → return(500ms)，X 眼 + 绷带 +
     //   旋转 90° 贴墙 + 弹性复位；触发时打断呼噜并清空 clickTimes。
     //   **无任何调用方**（`grep -rn 'injure()' src/` 仅定义处与注释）。
-    //   裁决处置：本方法删除，甩墙降级为 renderer 层 `pratfall()` 纯喜剧彩蛋，
+    //   裁决处置（T12 待实现）：本方法删除，甩墙降级为 renderer 层 `pratfall()` 纯喜剧彩蛋，
     //   **永不**由任何用户行为序列触发；"累瘫"改由 base 低档表达。
+    //   ⚠️ `pratfall()` 尚不存在（`grep -rn pratfall src/` = 0），是 T12 的计划改名。
     //   ⚠️ 源码注释仍写"未来若要接线，触发源必须是领域事件"——该预留已被裁决否决，
-    //   属**悬空许可**，登记于 [问题清单 §5.1](known-issues.md)（T0 只改 .md，不动源码）。
+    //   属**悬空许可**，登记于 [问题清单 §5.1](known-issues.md)（T0/v1.4 只改 .md，不动源码）。
+    //   📌 DESIGN.md 红线 R10/R11 措辞已于 **v1.4** 修订（用户 11:49 批准）："仅可由领域事件
+    //   触发"的悬空许可已从契约消除，R11 现为"跌倒态永不由任何用户行为序列触发"。
   dragStart(): void; dragMoveBy(dx: number, dy: number): void; dragEnd(): void;
     // ⟨黏性形变（dragStretch / dragVel）。🔴 R10：拖动路径**不 push clickTimes**，
     //   与 poke() 是两条独立入口，拖动永不计入连点。⟩

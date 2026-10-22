@@ -72,9 +72,16 @@ CREATE TABLE IF NOT EXISTS recommendations (
   suggested_delta REAL   NOT NULL,
   status         TEXT    NOT NULL DEFAULT 'pending',  -- pending|accepted|modified|rejected
   created_at     INTEGER NOT NULL,
-  resolved_at    INTEGER
+  resolved_at    INTEGER,
+  -- 证据计数（因果链可见性：周报里展示「本周 4 次，3 次你调低了」）
+  total_uses     INTEGER NOT NULL DEFAULT 0,  -- 窗口内该恢复项确认总次数
+  adjusted_down  INTEGER NOT NULL DEFAULT 0,  -- 用户调低次数
+  adjusted_up    INTEGER NOT NULL DEFAULT 0,  -- 用户调高次数
+  matched        INTEGER NOT NULL DEFAULT 0   -- 与预估吻合次数
 );
 CREATE INDEX IF NOT EXISTS idx_rec_status ON recommendations(status, created_at DESC);
+-- 推荐水位线查询：按 item 找最近一次处置时刻（MAX(resolved_at)）
+CREATE INDEX IF NOT EXISTS idx_rec_item_resolved ON recommendations(item_id, resolved_at DESC);
 `;
 
 export interface DecisionLogOptions {
@@ -107,11 +114,25 @@ export class DecisionLog {
   /**
    * 前向兼容迁移：老库的 recovery_versions 无 source 列（周报需区分
    * 「AI 推荐采纳」vs「用户手动调整」的变更来源）。幂等，失败静默（列已存在）。
+   *
+   * recommendations 的证据计数列同理（v1 库无这 4 列）：缺列会让 INSERT 直接报
+   * 「table recommendations has no column named total_uses」，必须先补。
    */
   private migrate(): void {
     const cols = this.db.prepare('PRAGMA table_info(recovery_versions)').all() as { name: string }[];
     if (!cols.some(c => c.name === 'source')) {
       try { this.db.exec("ALTER TABLE recovery_versions ADD COLUMN source TEXT NOT NULL DEFAULT 'user'"); } catch { /* already added */ }
+    }
+    const recCols = this.db.prepare('PRAGMA table_info(recommendations)').all() as { name: string }[];
+    const evidenceCols: [string, string][] = [
+      ['total_uses', 'INTEGER NOT NULL DEFAULT 0'],
+      ['adjusted_down', 'INTEGER NOT NULL DEFAULT 0'],
+      ['adjusted_up', 'INTEGER NOT NULL DEFAULT 0'],
+      ['matched', 'INTEGER NOT NULL DEFAULT 0'],
+    ];
+    for (const [name, decl] of evidenceCols) {
+      if (recCols.some(c => c.name === name)) continue;
+      try { this.db.exec(`ALTER TABLE recommendations ADD COLUMN ${name} ${decl}`); } catch { /* already added */ }
     }
   }
 
@@ -266,12 +287,47 @@ export class DecisionLog {
   insertRecommendation(rec: {
     id: string; itemId: string; itemName: string; predicted: number; actual: number;
     samples: number; message: string; suggestedDelta: number;
+    evidence?: EvidenceCounts;
   }): void {
+    const ev = rec.evidence ?? { total: 0, down: 0, up: 0, matched: 0 };
     this.db.prepare(
       `INSERT OR IGNORE INTO recommendations
-       (id, item_id, item_name, predicted, actual, samples, message, suggested_delta, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-    ).run(rec.id, rec.itemId, rec.itemName, rec.predicted, rec.actual, rec.samples, rec.message, rec.suggestedDelta, Date.now());
+       (id, item_id, item_name, predicted, actual, samples, message, suggested_delta, status, created_at,
+        total_uses, adjusted_down, adjusted_up, matched)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+    ).run(
+      rec.id, rec.itemId, rec.itemName, rec.predicted, rec.actual, rec.samples,
+      rec.message, rec.suggestedDelta, Date.now(),
+      ev.total, ev.down, ev.up, ev.matched,
+    );
+  }
+
+  /**
+   * 推荐水位线：某恢复项最近一次**被用户处置**（接受/修改/拒绝）的时刻（ms），无则 null。
+   *
+   * 为什么三种处置都要设水位线（而不只是拒绝）：
+   *
+   * 事件流是 append-only 的，历史 recovery.taken 里的 predicted_delta **永远不变**。
+   * 若只按 pending 去重，处置完成后那批旧记录仍留在 14 天窗口内继续"偏差"，
+   * 下一轮批处理（10 分钟后）就会用同一批数据原样重弹。实测两种复现：
+   *   - 拒绝后：连续 5 轮每轮重弹同一条 → 违反红线「拒绝零痕迹零情绪反馈」，
+   *     等于每 10 分钟提醒一次"你拒绝过我"，把拒绝变成需要反复辩护的行为。
+   *   - 接受后：默认值已改成 0.8，却仍反复建议"改成 0.8"（建议值 == 当前值）。
+   *
+   * 语义统一为一句话：**处置 = 该时刻之前的证据全部过期**。
+   *   - rejected：用户不认同这个判断，旧证据不该再拿来劝他。
+   *   - accepted / modified：默认值已被更新，旧证据是针对**旧默认值**测出来的，
+   *     在统计上已经失效，继续用它会得出"建议改成当前值"这种同义反复。
+   *
+   * 水位线只切时间，不永久封禁：处置之后**新发生**的 ≥3 次偏差仍可再次建议
+   * （用户习惯会变，系统必须能重新学习）。
+   */
+  lastResolvedAt(itemId: string): number | null {
+    const row = this.db.prepare(
+      `SELECT MAX(resolved_at) AS m FROM recommendations
+       WHERE item_id = ? AND resolved_at IS NOT NULL`,
+    ).get(itemId) as unknown as { m: number | null };
+    return row?.m ?? null;
   }
 
   resolveRecommendation(id: string, status: 'accepted' | 'modified' | 'rejected'): void {
@@ -332,10 +388,27 @@ interface Row {
 
 export interface RecoveryVersionRow { id: number; item_id: string; delta: number; reason: string; created_at: number; source: string }
 export interface DailySnapshotRow { date: string; close_energy: number; events_count: number; updated_at: number }
+
+/**
+ * 推荐卡片的证据计数（因果链可见性）。
+ * 周报里要能说「午睡本周 4 次，3 次你调低了」，而不是只给一个统计数字。
+ */
+export interface EvidenceCounts {
+  /** 窗口内该恢复项被确认的总次数 */
+  total: number;
+  /** 用户把实际值调到低于预估的次数 */
+  down: number;
+  /** 用户把实际值调到高于预估的次数 */
+  up: number;
+  /** 实际值与预估吻合的次数 */
+  matched: number;
+}
+
 export interface RecommendationRow {
   id: string; item_id: string; item_name: string; predicted: number; actual: number;
   samples: number; message: string; suggested_delta: number; status: string;
   created_at: number; resolved_at: number | null;
+  total_uses: number; adjusted_down: number; adjusted_up: number; matched: number;
 }
 
 function rowToEvent(r: Row): DomainEvent {

@@ -600,6 +600,7 @@ export class Coordinator {
       itemName: r.itemName,
       suggestedDelta: r.suggestedDelta,
       message: r.message,
+      evidence: r.evidence,
     }));
     const weekStartMs = report.weekStart;
     const itemNames = new Map(this.deck.list().map(i => [i.id, i.name] as const));

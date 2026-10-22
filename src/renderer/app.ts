@@ -390,7 +390,9 @@ function setupDrag(): void {
     window.pet.dragEnd();
     pet.dragEnd();
     if (treatAsClick && !moved) {
-      // 没拖动 → 视为点击：仅触发表情/形变反应（压平 + 连点甩墙），不再弹文字气泡
+      // 没拖动 → 视为点击：压平 + 粒子；连点 = 抚摸（呼噜正向反馈）。
+      // 永不触发受伤——甩墙只能由 pet.injure() 显式调用（当前无调用方）。
+      // DESIGN.md §5.3 / R10：用户的手永远只能得到正向反馈。
       pet.poke();
     }
   };
@@ -1006,14 +1008,24 @@ function applyReportModal(p: WeeklyReportPayload | null): void {
     `<li><span class="tick" aria-hidden="true"></span><span>${escapeHtml(x.label)}</span><b class="val">${escapeHtml(x.val)}</b></li>`,
   ).join('');
 
-  // AI 推荐默认值：同一恢复项重复 3 次后由记忆产出的校准建议
+  // AI 推荐默认值：同一恢复项重复 3 次后由记忆产出的校准建议。
+  // **每项推荐旁必须带证据计数**（因果链可见才能建立信任，预测错一次信任就崩）：
+  // 只给「预估 1.5 → 实际 0.8」这种系统算出的结论，用户无法回溯验证；
+  // 给出「近 14 天你用了 4 次，3 次你调低了」，用户能自己核对那 4 次记忆。
+  // 结构上名称行与证据行成对相邻（旧实现把两个列表拆开渲染，读起来对不上号）。
   if (p.aiSuggestions.length) {
     rmAiSec.style.display = '';
-    rmAi.innerHTML = p.aiSuggestions.map(a =>
-      `<li><span class="tick" aria-hidden="true"></span><span>${escapeHtml(a.itemName)}</span><b class="val">建议 ${fmtDelta(a.suggestedDelta)}</b></li>`,
-    ).join('') + p.aiSuggestions.map(a =>
-      `<li style="line-height:1.6;padding:2px 0 6px 21px;font-size:10.5px;color:#6b5638;border-bottom:1px dotted rgba(120,90,45,.35)">${escapeHtml(a.message)}</li>`,
-    ).join('');
+    rmAi.innerHTML = p.aiSuggestions.map(a => {
+      const ev = a.evidence;
+      // 证据计数的结构化展示：总数 + 主导方向 + 吻合数，与 message 叙事互为印证
+      const dominant = ev.adjustedDown > ev.adjustedUp ? '调低' : ev.adjustedUp > ev.adjustedDown ? '调高' : '调整';
+      const dominantCount = Math.max(ev.adjustedDown, ev.adjustedUp);
+      const counts = `近 ${ev.windowDays} 天用了 ${ev.total} 次 · ${dominantCount} 次${dominant}`
+        + (ev.matched > 0 ? ` · ${ev.matched} 次吻合` : '');
+      return `<li><span class="tick" aria-hidden="true"></span><span>${escapeHtml(a.itemName)}</span><b class="val">建议 ${fmtDelta(a.suggestedDelta)}</b></li>`
+        + `<li style="line-height:1.6;padding:1px 0 2px 21px;font-size:10px;color:#8a6f47;letter-spacing:.01em">${escapeHtml(counts)}</li>`
+        + `<li style="line-height:1.6;padding:0 0 7px 21px;font-size:10.5px;color:#6b5638;border-bottom:1px dotted rgba(120,90,45,.35)">${escapeHtml(a.message)}</li>`;
+    }).join('');
   } else {
     rmAiSec.style.display = 'none';
   }

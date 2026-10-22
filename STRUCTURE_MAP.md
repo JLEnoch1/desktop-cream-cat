@@ -225,7 +225,7 @@ energy-pet/
 | 14 | 🆕 **多通道读同一输入方向必须一致** | `resolveEarPose()` 的 droop 项按 `(1-max(0,joy))` 门控：愉悦眯眼 ≠ 疲惫耷眼（DESIGN.md §3.2.2） |
 | 15 | 🆕 **看得见的部位必须点得到** | 耳尖/尾梢几何并入 `petBounds()`（耳上界 -1.8R、尾梢 `tailTip`）；改尾巴/耳朵几何必须同步复核命中区 |
 | 16 | 🆕 **低精力配色不退暖**（R7） | `BASE_TIERS` hue ∈ [`WARM_HUE_MIN`=30, `WARM_HUE_MAX`=46]，疲惫靠 sat+lum 双降；`tests/emotion-tiers.test.ts` 6 条守护（含变异验证） |
-| 17 | 🔴 **受伤态永不由用户行为触发**（R10/R11 + 2026-10-22 裁决） | `injure()` 无调用方且已裁决除名；连点只走 `poke()`→呼噜。**勿把 `injure()`/`pratfall()` 接线到任何事件或手势** |
+| 17 | 🔴 **跌倒态永不由用户行为触发**（R10/R11，**v1.4 已修订措辞**） | `injure()`（`pet.ts:262`）**无调用方**且已裁决除名；连点只走 `poke()`→呼噜。**勿把 `injure()` 接线到任何事件或手势**（含领域事件与"拒绝计数"）。⚠️ `pratfall()` 尚不存在（`grep -rn pratfall src/` = 0），是 T12 的计划改名 |
 
 ---
 
@@ -234,7 +234,7 @@ energy-pet/
 > 全文（含逐条行号与 v1.3 重测注记）：[`docs/structure/known-issues.md`](docs/structure/known-issues.md)，保留 §5.1–5.4 编号。
 > 全部**仅登记，未改动任何代码**（T0 只改 .md）。四类的划分：
 
-- **§5.1 注释与实现矛盾** — 源码注释/历史文档说的与代码做的不一致（🔴 会误导实现者）。最危险：`PULSE_THRESHOLD` 实为 **3**，两处注释仍写"<6"；`injure()` 注释预留"未来接线"许可，已被裁决否决（悬空许可）。
+- **§5.1 注释与实现矛盾** — 源码注释/历史文档说的与代码做的不一致（🔴 会误导实现者）。最危险：`PULSE_THRESHOLD` 实为 **3**，两处注释仍写"<6"；`pet.ts:238` 的 `injure()` 注释仍预留"未来接线（领域事件触发）"许可，**已被裁决否决**（源码级悬空许可，待 T12 随改名删除）。📌 注：**DESIGN.md 的红线 R10/R11 措辞已于 v1.4 修订**（用户 11:49 批准，`injure()` 不再出现"仅可由领域事件触发"），文档层冲突已消；剩下的只是这行**源码注释**尚未跟进。
 - **§5.2 无调用方的公开 API** — TS 层死代码（约 13 个），多为测试可达性预留。⚠️ 例外：`injure()` 已裁决**永久除名**，不要当预留 API 接线。
 - **§5.3 有意的重复定义（勿"修复"）** — 最危险：`ENERGY_AFFECTING`（events.ts）与 `isEnergyAffecting()`（insight）同一规则两处表达，**新增精力事件两处都必须改**，否则周报漏项。
 - **§5.4 孤立死代码 / 已废弃通道 🆕** — 渲染层与协议层的重构残留。最危险：`preload` 的 `recoveryTake()` **恒返回 null 且静默无操作**（已迁 `recoveryStartAdjust`）；`win:hitTest` 空 handler 是刻意的，勿补实现。
@@ -249,7 +249,7 @@ energy-pet/
 | 新增事件类型 | `core/events.ts`（`EventType` + `EventPayload` + 工厂）→ `ledger/fold.ts` `nextEnergy()` | 若影响精力，必须同时加入 `ENERGY_AFFECTING` **和** `insight/engine.ts` 的 `isEnergyAffecting()`（两处重复，见[问题清单 §5.3](docs/structure/known-issues.md)） |
 | 改精力计算规则 | `ledger/fold.ts` 的 `nextEnergy()` | 单点修改即可，写路径与重放路径自动同步（不变式 4） |
 | 加情绪档位 | `emotion/engine.ts` 的 `BASE_TIERS`（含 `hue/sat/lum`）+ `renderer/pet.ts` 的 `EMOTION_PARAMS` | 两个 Record 都按 `BaseEmotion` 索引，漏一处会 TS 报错。**hue 必须落在 `WARM_HUE_MIN(30)–WARM_HUE_MAX(46)`**，`tests/emotion-tiers.test.ts` 6 条性质断言会拦住越界（红线 R7） |
-| 加 pulse 反应 | `core/types.ts` `PulseReaction` → `emotion/engine.ts` `PULSE_RULES` + `PULSE_PARAMS` → `pet.ts` `drawPulseAura` 内联 `colors` 表 | 规则按 priority 首个命中生效，不叠加。⚠️ `PULSE_PARAMS` 是**覆盖语义**（非叠加），且 colors 是 `Record<string,string>` **不受类型检查**，漏加会静默落到默认灰紫 `rgba(160,160,200,0.4)`（[问题清单 §5.4③](docs/structure/known-issues.md)）。⚠️ T4 待办：覆盖语义要改为偏移+档位调制，动这块前先读 DESIGN §矛盾C |
+| 加 pulse 反应 | `core/types.ts` `PulseReaction` → `emotion/engine.ts` `PULSE_RULES` + `PULSE_PARAMS` → `pet.ts` `drawPulseAura` 内联 `colors` 表 | 规则按 priority 首个命中生效，不叠加。⚠️ `PULSE_PARAMS` 是**覆盖语义**（非叠加），且 colors 是 `Record<string,string>` **不受类型检查**，漏加会静默落到默认灰紫 `rgba(160,160,200,0.4)`（[问题清单 §5.4③](docs/structure/known-issues.md)）。⚠️ T4 待办：覆盖语义要改为偏移+档位调制，动这块前先读 [DESIGN.md §4.3](DESIGN.md)（矛盾 C 裁决） |
 | 改尾巴/耳朵姿态 | `renderer/pet.ts` `resolveTailPose()` / `resolveEarPose()` | **必须是纯函数**（只读 RenderParams、无随机、无内部状态），`tests/pose.test.ts` 10 条覆盖。多通道读同一输入时方向必须一致（如 droop 按 `(1-max(0,joy))` 门控），见不变式 14/15 |
 | 加恢复项 | `recovery/deck.ts` 的 `DEFAULT_ITEMS` | `seedIfEmpty()` 会自动为新项写初始版本历史 |
 | 加 IPC 通道 | `main/index.ts` `registerIpc()` + `preload/index.ts` `api` | 两处签名需一致；`preload` 只暴露白名单 |

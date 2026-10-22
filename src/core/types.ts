@@ -136,6 +136,27 @@ export interface RecoveryVersion {
 
 /* ─────────────────────────── 洞察 ─────────────────────────── */
 
+/**
+ * 推荐卡片的证据计数 —— 因果链可见性。
+ *
+ * 设计意图：AI 推荐默认值时，必须把「凭什么」摊开给用户看。
+ * 只给一个「预估 1.5 → 实际 0.8」的统计结论，用户无法验证，预测错一次信任就崩；
+ * 给出「近 14 天你用了 4 次，3 次你把效果调低了」，用户能自己回溯那 4 次记忆，
+ * 因果链可见才能建立信任。
+ */
+export interface RecommendationEvidence {
+  /** 窗口内该恢复项被确认的总次数（「午睡本周 4 次」） */
+  total: number;
+  /** 用户把实际效果调到低于预估的次数（「3 次你调低了」） */
+  adjustedDown: number;
+  /** 用户把实际效果调到高于预估的次数 */
+  adjustedUp: number;
+  /** 实际与预估吻合的次数 */
+  matched: number;
+  /** 证据收集窗口（天），供 UI 表述「近 N 天」 */
+  windowDays: number;
+}
+
 export interface InsightRecommendation {
   id: string;
   itemId: string;
@@ -145,10 +166,12 @@ export interface InsightRecommendation {
   actual: number;
   /** 偏差样本数 */
   samples: number;
-  /** 建议文案 */
+  /** 建议文案（含证据计数的因果叙事） */
   message: string;
   suggestedDelta: number;
   createdAt: number;
+  /** 证据计数（周报每项推荐旁展示） */
+  evidence: RecommendationEvidence;
 }
 
 export interface WeeklyReport {
@@ -175,8 +198,15 @@ export interface WeeklyReport {
  */
 export interface WeeklyReportPayload {
   report: WeeklyReport;
-  /** AI 记忆推荐：同一恢复项重复 3 次后产出的默认值校准建议（未处置） */
-  aiSuggestions: { itemId: string; itemName: string; suggestedDelta: number; message: string }[];
+  /**
+   * AI 记忆推荐：同一恢复项重复 3 次后产出的默认值校准建议（未处置）。
+   * evidence 是因果链的原始数据，message 是它的自然语言表述 —— 两者都给，
+   * 让 UI 既能直接把叙事印在纸上，也能把计数做成独立的结构化标记。
+   */
+  aiSuggestions: {
+    itemId: string; itemName: string; suggestedDelta: number; message: string;
+    evidence: RecommendationEvidence;
+  }[];
   /** 近 7 天已确认的默认值变更（新→旧），source 标注决策来源 */
   decisions: { itemId: string; itemName: string; delta: number; reason: string; source: string; createdAt: number }[];
   /** 周五重点确认：弹窗不可随手关闭，必须点「已确认」 */

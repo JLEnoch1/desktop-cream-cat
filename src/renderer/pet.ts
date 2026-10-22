@@ -23,6 +23,8 @@ interface RenderParams {
   energy: number;
   hue: number;
   sat: number;
+  /** 明度基线（R7：低精力靠 sat+lum 表达疲惫，色相保持暖区间） */
+  lum: number;
   breath: number;   // 呼吸周期 s
   bounce: number;   // 弹跳幅度 px
   blink: number;    // 眨眼间隔 s
@@ -31,7 +33,6 @@ interface RenderParams {
   squish: number;   // 疲惫时的身体压扁程度
   tremble: number;  // 颤抖强度
 }
-
 /** base 情绪 → 嘴型曲线 / 眼睛开合 / 压扁 / 颤抖 */
 const EMOTION_PARAMS: Record<BaseEmotion, { mouthCurve: number; eyeOpen: number; squish: number; tremble: number }> = {
   blissful:  { mouthCurve: 1.0,  eyeOpen: 1.0, squish: 0,    tremble: 0 },
@@ -61,11 +62,85 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+/* ─────────────────── 姿态解算（M1：尾巴 & 耳朵情绪通道） ───────────────────
+ *
+ * 设计原则（DESIGN.md §3 / M1）：
+ *   这两条通道都只读 RenderParams 里已有的连续量（energy / mouthCurve /
+ *   tremble / eyeOpen），**不引入新状态、不引入随机数**。
+ *   随机动画不提供信息，只提供噪声——尾巴和耳朵必须「读得出」情绪：
+ *     · 尾巴：lift（抬升角）∝ 精力+愉悦，amp/speed（摆幅/摆速）∝ 愉悦+颤抖
+ *     · 耳朵：pose ∈ [-1, 1]，正 = 前倾警觉/开心，负 = 飞机耳/耷拉（累、怕）
+ *   做成导出的纯函数，便于在 node 环境单测（不依赖 canvas/DOM）。
+ */
+
+/** 尾巴姿态（连续量，供 drawTail 使用） */
+export interface TailPose {
+  /** 抬升：-0.6 = 垂到地面（burnt），1.1 = 高高竖起（blissful） */
+  lift: number;
+  /** 摆动幅度（弧度） */
+  amp: number;
+  /** 摆动角速度（rad/s） */
+  speed: number;
+  /** 长度系数（×bodyR） */
+  len: number;
+}
+
+/**
+ * 尾巴姿态解算。输入 = 插值后的连续情绪量（RenderParams 子集）。
+ *
+ * 语义映射：
+ *   精力高 → 尾巴竖起、摆得欢快；精力低 → 尾巴垂落、几乎不动。
+ *   愉悦（mouthCurve>0，含抚摸呼噜加成）→ 抬升与摆幅再叠一层。
+ *   颤抖（焦虑/疲惫 pulse）→ 小幅高频颤动（speed↑、amp↑），与开心的
+ *   大摆区分：开心是「摇」，害怕是「抖」。
+ */
+export function resolveTailPose(p: { energy: number; mouthCurve: number; tremble: number }): TailPose {
+  const e = clamp(p.energy, 0, 10) / 10;
+  const joy = clamp(p.mouthCurve, -1, 1);
+  const lift = clamp(-0.45 + e * 1.45 + Math.max(0, joy) * 0.28 - p.tremble * 0.22, -0.6, 1.1);
+  const amp = clamp(0.12 + Math.max(0, joy) * 0.42 + p.tremble * 0.3 + e * 0.1, 0.08, 0.9);
+  const speed = clamp(1.1 + e * 2.2 + p.tremble * 5.5 + Math.max(0, joy) * 0.8, 0.6, 9);
+  return { lift, amp, speed, len: 1.28 + e * 0.22 };
+}
+
+/**
+ * 耳朵姿态解算。返回 [-1, 1]：
+ *   +1 = 前倾（警觉/开心，耳朵朝前竖）
+ *    0 = 自然位
+ *   -1 = 飞机耳/后压耷拉（疲惫、害怕、低落）
+ *
+ * 输入：mouthCurve（愉悦→前倾；不悦→后压）、tremble（恐惧→强力后压）、
+ * eyeOpen（眼皮耷拉→耳朵也跟着耷拉，同向强化「累」的读取一致性）。
+ *
+ * ⚠️ 愉悦眯眼 ≠ 疲惫耷眼：被抚摸时 loop() 会把 eyeOpen 压低（舒服到眯起来），
+ * 若无条件按「眼皮低 = 累」处理，一只 mouthCurve≈1 的开心猫会被压成飞机耳，
+ * 与「前倾」语义直接打架。故 droop 项按 (1 - joy) 门控：愉悦越高，眼皮低
+ * 越读作「享受的眯眼」而非「疲惫」，不触发飞机耳。
+ */
+export function resolveEarPose(p: { mouthCurve: number; tremble: number; eyeOpen: number }): number {
+  const joy = clamp(p.mouthCurve, -1, 1);
+  const droop = clamp(0.6 - p.eyeOpen, 0, 0.6) / 0.6; // 0 = 眼睁大，1 = 眼皮耷拉到 0
+  const droopPull = droop * (1 - Math.max(0, joy));    // 愉悦眯眼不拉耳朵
+  return clamp(Math.max(0, joy) * 0.7 + Math.min(0, joy) * 0.45 - p.tremble * 1.5 - droopPull * 0.75, -1, 1);
+}
+
 /* ── 触碰交互常量（纯渲染层，不落库） ── */
-/** 连点判定窗口：窗口内点击达到次数即触发甩墙 */
-const RAPID_CLICK_WINDOW_MS = 1200;
-const RAPID_CLICK_COUNT = 4;
-/** 甩墙动画三段：飞向墙 → 贴墙受伤 → 弹性复位 */
+/**
+ * 连点 = 抚摸（DESIGN.md §5.3 v1.1）。
+ *
+ * 历史教训：旧实现「1.2s 内 ≥4 连点 → 甩墙受伤」把 ADHD 用户思考时的
+ * 无意识连点判成虐待并施加惩罚；设计稿的替代方案「10s/5次」换算后
+ * 0.5 次/秒，误伤率更高。两个阈值都已废除——连点只有正向反馈一条路。
+ */
+const PETTING_WINDOW_MS = 2500;
+const PETTING_CLICKS = 3;
+/** 抚摸后的呼噜加成时长（嘴型上扬的衰减窗口） */
+const PETTING_BOOST_MS = 2000;
+/** 甩墙动画三段：飞向墙 → 贴墙 → 弹性复位（受伤态仅由 injure() 显式触发） */
 const INJURY_FLY_MS = 350;
 const INJURY_HOLD_MS = 8000;
 const INJURY_RETURN_MS = 500;
@@ -103,8 +178,13 @@ export class PetRenderer {
   private draggingNow = false;
   private lastDragMove = 0;
 
-  /** 连点甩墙：点击时间戳队列 + 受伤相位机（纯本地，不落库） */
+  /** 连点计数（窗口 PETTING_WINDOW_MS 内的点击时间戳） */
   private clickTimes: number[] = [];
+  /** 尾梢画布坐标（每帧 render 更新；petBounds 用它把尾巴纳入命中区） */
+  private tailTip = { x: 0, y: 0 };
+  /** 抚摸呼噜加成的到期时刻（performance.now 基准）；0 = 无加成 */
+  private pettingUntil = 0;
+  /** 甩墙相位机（仅由 injure() 显式触发；连点永不触发） */
   private injury: { phase: 'fly' | 'hold' | 'return'; start: number; dir: 1 | -1 } | null = null;
 
   /** 粒子（开心时的星星 / 恢复时的光点） */
@@ -150,20 +230,40 @@ export class PetRenderer {
   /**
    * 触碰（单击）：压平反馈 + 少量粒子 + 连点计数。
    * 不再产生任何文字气泡——触碰只触发表情/形变变化。
-   * 1.2s 内连点 ≥4 次 → 甩墙受伤（平铺贴墙 + 绷带，8s）。
+   *
+   * 连点语义 = **抚摸**（正向反馈），永不触发受伤。
+   * PETTING_WINDOW_MS 内点满 PETTING_CLICKS 次 → 呼噜加成：
+   * 嘴型上扬 + 轻柔震颤 + 暖色粒子，PETTING_BOOST_MS 内衰减。
+   *
+   * 受伤态只能由 injure() 显式触发（当前无调用方，保留 API 供未来
+   * 由「真实负向事件」驱动，例如连续拒绝恢复建议 —— 而非用户的手）。
    */
   poke(): void {
     const now = performance.now();
     this.pokeTime = now;
     this.spawnParticles(4, this.current.hue);
-    if (this.injury) return; // 受伤期间免疫连点惩罚
     this.clickTimes.push(now);
     // 只保留窗口内的点击
-    this.clickTimes = this.clickTimes.filter(ts => now - ts <= RAPID_CLICK_WINDOW_MS);
-    if (this.clickTimes.length >= RAPID_CLICK_COUNT) {
+    this.clickTimes = this.clickTimes.filter(ts => now - ts <= PETTING_WINDOW_MS);
+    if (this.clickTimes.length >= PETTING_CLICKS) {
       this.clickTimes = [];
-      this.injury = { phase: 'fly', start: now, dir: Math.random() < 0.5 ? -1 : 1 };
+      this.pettingUntil = now + PETTING_BOOST_MS;
+      this.spawnParticles(10, 38); // 暖金色呼噜粒子
     }
+  }
+
+  /**
+   * 显式触发甩墙受伤（三段：fly → hold → return，X 眼 + 绷带）。
+   *
+   * 🔴 与 poke() 彻底解耦：连点不调用本方法，拖动不调用本方法。
+   * 未来若要接线，触发源必须是**领域事件**（如连续拒绝恢复建议），
+   * 不能是用户的手部动作 —— 用户的手永远只能得到正向反馈。
+   */
+  injure(): void {
+    if (this.injury) return; // 受伤期间不重复触发
+    this.pettingUntil = 0;    // 打断呼噜加成
+    this.clickTimes = [];
+    this.injury = { phase: 'fly', start: performance.now(), dir: Math.random() < 0.5 ? -1 : 1 };
   }
 
   /** 拖拽开始：进入黏性形变模式 */
@@ -239,13 +339,16 @@ export class PetRenderer {
       };
     }
     // 主体：宽 ±bodyR*1.05；高从影子上缘到身体顶部
-    const left = cx - bodyR * 1.05 - 6;
+    // 尾巴（M1）：尾梢可能探出主体右侧/垂到影子线以下，纳入包围盒，
+    // 保证「看得见的尾巴点得到」（热区与视觉一致，R 系热区不变式）
+    const tailPad = bodyR * 0.3;
+    const left = Math.min(cx - bodyR * 1.05 - 6, this.tailTip.x - tailPad);
     // 天气精灵锚定头顶右侧（x+44，半径 ~20，闪电下探 +30）
-    const right = Math.max(cx + bodyR * 1.05, cx + 44 + 22) + 6;
+    const right = Math.max(Math.max(cx + bodyR * 1.05, cx + 44 + 22) + 6, this.tailTip.x + tailPad + 6);
     const top = this.overlay === 'none'
-      ? baseY - bodyR * 1.42 - 12
+      ? baseY - bodyR * 1.8 - 8 // 耳尖（M1 三角耳露出到 -1.78R）
       : baseY - bodyR * 1.75 - 46;
-    const bottom = baseY + 22; // 影子
+    const bottom = Math.max(baseY + 22, this.tailTip.y + tailPad); // 影子 / 垂尾梢
     return {
       x: Math.max(0, Math.round(left)),
       y: Math.max(0, Math.round(top)),
@@ -268,6 +371,7 @@ export class PetRenderer {
       energy,
       hue: tier.hue,
       sat: tier.sat,
+      lum: tier.lum,
       breath: tier.breath,
       bounce: tier.bounce,
       blink: tier.blink,
@@ -286,17 +390,39 @@ export class PetRenderer {
     const t = (now - this.startTime) / 1000;
     const dt = 1 / 60;
 
+    // 抚摸呼噜加成：线性衰减到 0（pettingUntil 由 poke() 连点触发设置）
+    const petting = this.pettingUntil > now
+      ? (this.pettingUntil - now) / PETTING_BOOST_MS
+      : 0;
+
     // 平滑插值（指数趋近，帧率无关近似）
     const k = 1 - Math.exp(-dt * 6);
     this.current.energy = lerp(this.current.energy, this.target.energy, k);
     this.current.hue = lerp(this.current.hue, this.target.hue, k);
     this.current.sat = lerp(this.current.sat, this.target.sat, k);
+    this.current.lum = lerp(this.current.lum, this.target.lum, k);
     this.current.breath = lerp(this.current.breath, this.target.breath, k);
     this.current.bounce = lerp(this.current.bounce, this.target.bounce, k);
-    this.current.eyeOpen = lerp(this.current.eyeOpen, this.target.eyeOpen, k);
-    this.current.mouthCurve = lerp(this.current.mouthCurve, this.target.mouthCurve, k);
+    // 呼噜时眼睛舒服地眯起来（不低于 0.25，保持「醒着且享受」而非「睡着」）
+    this.current.eyeOpen = lerp(
+      this.current.eyeOpen,
+      Math.max(0.25, this.target.eyeOpen - petting * 0.35),
+      k,
+    );
+    // 呼噜 = 嘴型上扬 + 轻微眯眼（舒服到眯起来），随加成衰减
+    this.current.mouthCurve = lerp(
+      this.current.mouthCurve,
+      Math.min(1, this.target.mouthCurve + petting * 0.6),
+      k,
+    );
     this.current.squish = lerp(this.current.squish, this.target.squish, k);
-    this.current.tremble = lerp(this.current.tremble, this.target.tremble, k);
+    // 呼噜震颤：低幅高频（purr），与焦虑 tremble 的高幅区分开——
+    // 取两者的较大值，避免「累+被抚摸」时把焦虑颤抖洗掉
+    this.current.tremble = lerp(
+      this.current.tremble,
+      Math.max(this.target.tremble, petting * 0.12),
+      k,
+    );
 
     // 拖拽黏性形变：速度向量 → 拉伸目标；拖拽中快速跟随，松手后慢速衰减（鼻涕回弹感）
     const sK = 1 - Math.exp(-dt * (this.draggingNow ? 18 : 7));
@@ -408,15 +534,38 @@ export class PetRenderer {
       this.drawPulseAura(px, py - bodyR * 0.4, bodyR, t);
     }
 
+    // ── 尾巴（身体后图层：M1 情绪通道，姿态由 resolveTailPose 解算） ──
+    // 与身体共享位移/旋转/挤压变换，但画在身体之前 → 视觉上在「身后」
+    const scX = squishX * (1 + breathPhase * 0.015);
+    const scY = squishY * (1 - breathPhase * 0.02);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(injRot);
+    ctx.scale(scX, scY);
+    const tailTip = this.drawTail(ctx, bodyR, p, t);
+    ctx.restore();
+    // 记录尾梢画布坐标：petBounds() 用它把尾巴纳入命中区（热区与视觉一致）
+    this.tailTip = {
+      x: px + scX * tailTip.x * Math.cos(injRot) - scY * tailTip.y * Math.sin(injRot),
+      y: py + scX * tailTip.x * Math.sin(injRot) + scY * tailTip.y * Math.cos(injRot),
+    };
+
     // ── 身体 ──
+    // 明度跟随 lum 通道（R7）：高精力透亮、低精力发灰发暗，色相始终暖金
+    const L = p.lum;
     const bodyGrad = ctx.createRadialGradient(px - bodyR * 0.35, py - bodyR * 1.2, bodyR * 0.2, px, py - bodyR * 0.5, bodyR * 1.6);
-    bodyGrad.addColorStop(0, `hsl(${p.hue} ${p.sat}% 78%)`);
-    bodyGrad.addColorStop(0.55, `hsl(${p.hue} ${p.sat}% 64%)`);
-    bodyGrad.addColorStop(1, `hsl(${p.hue} ${Math.max(20, p.sat - 12)}% 48%)`);
+    bodyGrad.addColorStop(0, `hsl(${p.hue} ${p.sat}% ${Math.min(92, L + 14)}%)`);
+    bodyGrad.addColorStop(0.55, `hsl(${p.hue} ${p.sat}% ${L}%)`);
+    bodyGrad.addColorStop(1, `hsl(${p.hue} ${Math.max(20, p.sat - 12)}% ${Math.max(34, L - 16)}%)`);
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(injRot);
     ctx.scale(squishX * (1 + breathPhase * 0.015), squishY * (1 - breathPhase * 0.02));
+    // 耳朵（M1 情绪通道）：画在头顶之后——基部被头部轮廓遮住，只露三角尖；
+    // 飞机耳/耷拉/前倾的姿态差异在三角剪影上才读得出来（天线读不出）
+    const earPose = resolveEarPose(p);
+    this.drawEar(ctx, -bodyR * 0.46, -bodyR * 1.26, -1, earPose, breathPhase, p, bodyR);
+    this.drawEar(ctx, bodyR * 0.46, -bodyR * 1.26, 1, earPose, breathPhase, p, bodyR);
     ctx.fillStyle = bodyGrad;
     ctx.beginPath();
     // 圆润的团子形：底部平，顶部圆
@@ -434,10 +583,6 @@ export class PetRenderer {
     ctx.ellipse(-bodyR * 0.38, -bodyR * 0.95, bodyR * 0.2, bodyR * 0.13, -0.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
-
-    // 耳朵（小触角，随心情摆动）
-    this.drawEar(ctx, -bodyR * 0.42, -bodyR * 1.34, -0.35 + breathPhase * 0.08, p);
-    this.drawEar(ctx, bodyR * 0.42, -bodyR * 1.34, 0.35 - breathPhase * 0.08, p);
 
     // ── 脸 ──
     const faceY = -bodyR * 0.72;
@@ -468,22 +613,130 @@ export class PetRenderer {
 
   /* ─────────────────────────── 部件绘制 ─────────────────────────── */
 
-  private drawEar(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, p: RenderParams): void {
+  /**
+   * 耳朵（M1 情绪编码通道）：圆角三角猫耳，基部埋入头顶轮廓（render 里
+   * 先画耳后画头，只露三角尖）。
+   *
+   * 姿态由 resolveEarPose() 解算（pose ∈ [-1,1]）：
+   *   pose > 0 → 收拢前倾（开心/警觉/被抚摸）：三角朝脸心立起
+   *   pose = 0 → 自然外张
+   *   pose < 0 → 飞机耳：外张 + 下压 + 缩短 + 耳廓内暖色收淡（疲惫/害怕）
+   * 呼吸只保留微量摆动（0.03 rad），作为「活着」的底噪而非信息。
+   *
+   * @param side -1 = 左耳，1 = 右耳
+   */
+  private drawEar(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    side: number,
+    pose: number,
+    breathPhase: number,
+    p: RenderParams,
+    bodyR: number,
+  ): void {
+    const s = bodyR;
     ctx.save();
     ctx.translate(x, y);
+    const splay = Math.max(0, -pose); // 0..1 飞机耳程度
+    const angle = side * (0.22 - pose * 0.38 + splay * 0.5) + side * breathPhase * 0.03;
     ctx.rotate(angle);
-    ctx.strokeStyle = `hsl(${p.hue} ${p.sat}% 42%)`;
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
+    const lenScale = 1 - splay * 0.28; // 低落时耳朵缩短下压（耷拉感）
+    const w = s * 0.3;                 // 耳基半宽
+    const h = s * 0.52 * lenScale;     // 露出高度
+    // 耳廓：圆角三角（基部两点 + 耳尖圆角二次贝塞尔）
+    ctx.fillStyle = `hsl(${p.hue} ${p.sat}% ${Math.max(40, p.lum - 10)}%)`;
     ctx.beginPath();
-    ctx.moveTo(0, 8);
-    ctx.quadraticCurveTo(2, -8, 6, -14);
-    ctx.stroke();
-    ctx.fillStyle = `hsl(${(p.hue + 24) % 360} 90% 70%)`;
+    ctx.moveTo(-w, s * 0.12);
+    ctx.quadraticCurveTo(-w * 0.55, -h * 0.82, 0, -h);
+    ctx.quadraticCurveTo(w * 0.55, -h * 0.82, w, s * 0.12);
+    ctx.closePath();
+    ctx.fill();
+    // 耳内暖粉（色相向粉红方向偏 330°：暖金 40° → 10° 橙粉；+24° 会落在
+    // 黄绿区，读作「新芽」而非猫耳内。飞机耳时收淡——血色褪去的疲惫隐喻）
+    ctx.fillStyle = `hsl(${(p.hue + 330) % 360} ${78 - splay * 26}% ${78 - splay * 9}%)`;
     ctx.beginPath();
-    ctx.arc(6, -16, 4.5, 0, Math.PI * 2);
+    ctx.moveTo(-w * 0.5, s * 0.06);
+    ctx.quadraticCurveTo(-w * 0.28, -h * 0.62, 0, -h * 0.68);
+    ctx.quadraticCurveTo(w * 0.28, -h * 0.62, w * 0.5, s * 0.06);
+    ctx.closePath();
     ctx.fill();
     ctx.restore();
+  }
+
+  /**
+   * 尾巴（M1 情绪通道）：锥形贝塞尔脊柱，画在身体后图层。
+   *
+   * 姿态全部来自 resolveTailPose()（纯函数、无随机、无新状态）：
+   *   lift  → 根部仰角（高精力竖起、burnt 拖地）
+   *   amp/speed → 摆动（开心是「摇」：大摆幅中速；害怕是「抖」：小摆幅高频）
+   *   len   → 长度随精力略增（元气满满时尾巴也更蓬）
+   * 鞭状传导刻意收敛（0.3→0.9×sway）：过强会让摆相位抵消根部仰角，
+   * 尾巴在截图里读成「水平贴纸」而非竖/垂的尾巴。
+   * 垂落钳制：lift<0 时尾梢不允许穿过地面（影子线 +0.22R），burnt 读作
+   * 「尾巴拖在地上」而非「插进地里」。
+   *
+   * @returns 尾梢局部坐标（供 petBounds 把尾巴纳入命中区）
+   */
+  private drawTail(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams, t: number): { x: number; y: number } {
+    const pose = resolveTailPose(p);
+    const sway = Math.sin(t * pose.speed) * pose.amp;
+    const L = bodyR * pose.len;
+    const N = 10;
+    // 根/梢方向：梢部恒定再上勾 0.55rad（猫的「?」尾钩），摆动作为
+    // 全脊柱的加性扰动——旧实现让摆相位随 s 放大到能抵消根部仰角，
+    // 截图里整条尾巴塌成水平鱼鳍，读不出「竖/垂」。
+    const rootA = -pose.lift * 0.95 + sway * 0.25;
+    const tipA = rootA - 0.55 + sway * 0.45;
+    const x0 = bodyR * 0.55;
+    const y0 = -bodyR * 0.12;
+    const floorY = bodyR * 0.22; // 地面线（局部坐标，≈影子上缘）
+    // 脊柱采样：方向根→梢插值（s² 缓入：尾钩主要出现在后半段）
+    const pts: [number, number][] = [[x0, y0]];
+    let x = x0;
+    let y = y0;
+    for (let i = 1; i <= N; i++) {
+      const s = i / N;
+      const a = rootA + (tipA - rootA) * (s * s);
+      x += Math.cos(a) * (L / N);
+      y += Math.sin(a) * (L / N);
+      if (pose.lift < 0) y = Math.min(y, floorY + s * bodyR * 0.06); // 垂尾贴地钳制
+      pts.push([x, y]);
+    }
+    // 锥形轮廓：宽度 0.22R（根）→ 0.06R（梢）
+    const wAt = (s: number): number => bodyR * (0.22 - 0.16 * s);
+    const normalAt = (i: number): [number, number] => {
+      const [bx, by] = pts[Math.min(N, i + 1)];
+      const [cx, cy] = pts[Math.max(0, i - 1)];
+      const dx = bx - cx;
+      const dy = by - cy;
+      const d = Math.hypot(dx, dy) || 1;
+      return [-dy / d, dx / d];
+    };
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const [nx, ny] = normalAt(i);
+      const w = wAt(i / N);
+      const [ax, ay] = pts[i];
+      if (i === 0) ctx.moveTo(ax + nx * w, ay + ny * w);
+      else ctx.lineTo(ax + nx * w, ay + ny * w);
+    }
+    for (let i = N; i >= 0; i--) {
+      const [nx, ny] = normalAt(i);
+      const w = wAt(i / N);
+      const [ax, ay] = pts[i];
+      ctx.lineTo(ax - nx * w, ay - ny * w);
+    }
+    ctx.closePath();
+    // 比身体暗一档：读作「身后的尾巴」而非贴纸（M4 再做花纹/渐变）
+    ctx.fillStyle = `hsl(${p.hue} ${Math.max(24, p.sat - 6)}% ${Math.max(38, p.lum - 8)}%)`;
+    ctx.fill();
+    // 尾梢圆头（闭合锥形的尖端帽，避免楔形切口感）
+    const [tipX, tipY] = pts[N];
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, wAt(1), 0, Math.PI * 2);
+    ctx.fill();
+    return { x: tipX, y: tipY };
   }
 
   private drawEyes(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, now: number, injured = false): void {
@@ -530,7 +783,7 @@ export class PetRenderer {
       ctx.fill();
       // 疲惫：眼皮下垂（上半遮罩）
       if (p.eyeOpen < 0.7) {
-        ctx.fillStyle = `hsl(${p.hue} ${p.sat}% 64%)`;
+        ctx.fillStyle = `hsl(${p.hue} ${p.sat}% ${Math.max(40, p.lum)}%)`;
         ctx.beginPath();
         ctx.ellipse(0, -r * (1.6 - p.eyeOpen), r * 1.25, r * 0.9, 0, 0, Math.PI * 2);
         ctx.fill();
