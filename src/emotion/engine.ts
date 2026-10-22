@@ -3,7 +3,7 @@
  *
  *   base   : 10 档精力状态表      → 决定宠物主体表情
  *   weather: 独立 overlay 精灵     → 锚定头顶，不参与表情状态机
- *   pulse  : 决策日志驱动的瞬时反应 → 精力 < 6 时激活
+ *   pulse  : 决策日志驱动的瞬时反应 → 全档激活，强度由 pulse-contract 调制
  *
  * resolve(energy, weather, events) → EmotionState
  */
@@ -53,9 +53,6 @@ export const BASE_TIERS: readonly BaseTier[] = [
   { emotion: 'exhausted', min: 1.5, label: '疲惫', headline: '快撑不住了，请救救我',     breath: 5.6, bounce: 1, blink: 2.6, hue: 34, sat: 32, lum: 58 },
   { emotion: 'burnt',     min: -1,  label: '枯竭', headline: '已关机边缘…',              breath: 6.5, bounce: 0.5, blink: 2.2, hue: 33, sat: 24, lum: 52 },
 ] as const;
-
-/** pulse 激活阈值：精力 < 3 分（量程 0–10 的低电区） */
-export const PULSE_THRESHOLD = 3;
 
 export function tierFor(energy: number): BaseTier {
   for (const t of BASE_TIERS) {
@@ -135,7 +132,8 @@ export function resolveWeatherOverlay(energy: number, condition: WeatherConditio
  * （DESIGN.md §4.4 / R6：composite 一旦驱动表情，天气就从共情层退化为评价层）。
  *
  * 语义：同样下雨，精力高时是「惬意听雨」，精力低时是「雪上加霜」。
- * 量程 0–10：low 与 PULSE_THRESHOLD(3) 对齐，high 从「满足」档起步。
+ * 量程 0–10：low 档（<3）是 composite 查表用的独立分档，与已废除的
+ * pulse 激活门槛无关（后者全档激活，见 pulse-contract.ts）；high 从「满足」档起步。
  */
 export type EnergyBand = 'high' | 'mid' | 'low';
 
@@ -332,7 +330,8 @@ export interface ResolveInput {
 /**
  * 三层合成 —— 纯函数。
  * base 决定主体表情，weather 贡献 overlay（受显示门槛约束）与复合修饰，
- * pulse 在低精力时叠加瞬时反应。
+ * pulse 全档叠加瞬时反应，其**强度**由 pulse-contract.intensity() 调制
+ * （高精力压缩、低精力全幅）。
  *
  * 重要区分：
  *   - `overlay`  = 「头顶要不要画东西」→ 走 resolveWeatherOverlay()，含精力门槛
@@ -348,7 +347,10 @@ export function resolve(input: ResolveInput): EmotionState {
   const band = energyBand(energy);
   const modifier = COMPOSITE_TABLE[input.weather.condition][band];
 
-  const pulseActive = energy < PULSE_THRESHOLD;
+  // 门槛已废除（Q1 裁决），全档激活；字段保留以维持 EmotionState 形状，
+  // 下游可安全忽略。激活与否不再由精力决定，脉冲的「轻重」交给
+  // pulse-contract.pulseIntensity() 按精力调制。
+  const pulseActive = true;
   const signals = extractPulseSignals(input.events, now);
   const { reaction, headline: pulseHeadline } = resolvePulse(signals, pulseActive);
 

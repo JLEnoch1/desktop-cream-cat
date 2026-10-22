@@ -18,7 +18,7 @@ import {
 } from '../src/core/events.js';
 import {
   resolve, tierFor, extractPulseSignals, resolvePulse, PULSE_RULES,
-  COMPOSITE_TABLE, MODIFIER_LABEL, energyBand, PULSE_THRESHOLD,
+  COMPOSITE_TABLE, MODIFIER_LABEL, energyBand,
   resolveWeatherOverlay, WEATHER_DISPLAY_ENERGY_MIN, describe,
 } from '../src/emotion/engine.js';
 import { TaskCenter } from '../src/task/center.js';
@@ -130,8 +130,10 @@ test('emotion: resolve 输出完整 EmotionState', () => {
   assert.equal(st.base, 'content');
   // 精力 7 < 8（显示门槛）→ 晴也不挂太阳
   assert.equal(st.overlay, 'none');
-  assert.equal(st.pulse, 'none');
-  assert.equal(st.pulseActive, false);
+  // 门槛已废除（Q1）：全档激活，高精力同样参与 pulse 判定
+  assert.equal(st.pulseActive, true);
+  // 空事件流下 msSinceLastChange = MAX_SAFE_INTEGER ≥ 90min ⇒ 命中兜底的 numb
+  assert.equal(st.pulse, 'numb');
   assert.ok(st.composite.includes('content'));
   assert.ok(st.headline.length > 0);
 });
@@ -214,13 +216,18 @@ test('emotion: 雷阵雨+高精力 无正向修饰（charged 已废除，两层�
   const s7 = resolve({ energy: 7, weather: storm, events: [] });
   assert.equal(s7.overlay, 'storm-bolt');
   assert.equal(energyBand(7), 'high');
-  assert.equal(s7.composite, 'content'); // 无修饰后缀 → 只有 base（7 落 content 档）
+  // 无天气修饰后缀（thunderstorm×high = neutral）。门槛废除后全档激活，
+  // 空事件流会追加 pulse 段（numb），故用 startsWith 守「base 之后没有修饰」
+  // 而不是全等 'content' —— 本条要守的是天气层沉默，不是 pulse 层。
+  assert.ok(s7.composite.startsWith('content'), s7.composite);
+  assert.ok(!s7.composite.includes('charged'), 'charged 不得复活');
   assert.equal(describe(s7, storm), '满足 · 雷阵雨'); // 无「反而被点燃」
 
   // 精力 9（>=8）时 overlay 归 none，叙事层同样沉默
   const s9 = resolve({ energy: 9, weather: storm, events: [] });
   assert.equal(s9.overlay, 'none');
-  assert.equal(s9.composite, 'radiant');
+  assert.ok(s9.composite.startsWith('radiant'), s9.composite);
+  assert.ok(!s9.composite.includes('charged'), 'charged 不得复活');
 
   // 低精力侧的 startled 保留（外部归因，不指向自我价值）
   const s2 = resolve({ energy: 2, weather: storm, events: [] });
@@ -239,12 +246,28 @@ test('emotion: 同精力不同天气 → composite 不同', () => {
 
 /* ─────────────────────────── pulse ─────────────────────────── */
 
-test('pulse: 精力 <3 才激活', () => {
-  assert.equal(PULSE_THRESHOLD, 3);
-  const hi = resolve({ energy: 3, weather: sunnyWeather(), events: [] });
-  assert.equal(hi.pulseActive, false);
-  const lo = resolve({ energy: 2.9, weather: sunnyWeather(), events: [] });
-  assert.equal(lo.pulseActive, true);
+/**
+ * Q1 裁决：激活门槛已废除，全档激活。
+ *
+ * 旧行为「精力 <3 才激活」被明确否决 —— 门槛是旧设计遗产，留着它等于给
+ * 全幅区间装个只许全幅通过的闸门。现在脉冲的「轻重」由
+ * pulse-contract.intensity() 按精力调制（高精力压缩、低精力全幅），
+ * 而「有没有反应」不再看精力。
+ */
+test('pulse: 门槛已废除，全档激活', () => {
+  const hi = resolve({ energy: 10, weather: sunnyWeather(), events: [] });
+  assert.equal(hi.pulseActive, true, '精力 10 也必须激活');
+  const lo = resolve({ energy: 0, weather: sunnyWeather(), events: [] });
+  assert.equal(lo.pulseActive, true, '精力 0 必须激活');
+  // 旧门槛两侧（3 / 2.9）现在同侧：激活状态不再随精力翻转
+  assert.equal(
+    resolve({ energy: 3, weather: sunnyWeather(), events: [] }).pulseActive,
+    resolve({ energy: 2.9, weather: sunnyWeather(), events: [] }).pulseActive,
+  );
+  // 全量程扫描：任何精力下都激活
+  for (let e = 0; e <= 10; e += 0.5) {
+    assert.equal(resolve({ energy: e, weather: sunnyWeather(), events: [] }).pulseActive, true, `energy=${e}`);
+  }
 });
 
 test('pulse: 6 条规则各有判定，连续拒绝 → anxious', () => {
