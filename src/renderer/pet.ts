@@ -256,10 +256,10 @@ const PETTING_WINDOW_MS = 2500;
 const PETTING_CLICKS = 3;
 /** 抚摸后的呼噜加成时长（嘴型上扬的衰减窗口） */
 const PETTING_BOOST_MS = 2000;
-/** 甩墙动画三段：飞向墙 → 贴墙 → 弹性复位（受伤态仅由 injure() 显式触发） */
-const INJURY_FLY_MS = 350;
-const INJURY_HOLD_MS = 8000;
-const INJURY_RETURN_MS = 500;
+/** 甩墙动画三段：飞向墙 → 平铺 → 弹性复位（跌倒态仅由 pratfall() 显式触发） */
+const PRATFALL_FLY_MS = 350;
+const PRATFALL_HOLD_MS = 8000;
+const PRATFALL_RETURN_MS = 500;
 
 function easeOut(x: number): number { const q = 1 - x; return 1 - q * q * q; }
 function easeInOut(x: number): number { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
@@ -300,8 +300,8 @@ export class PetRenderer {
   private tailTip = { x: 0, y: 0 };
   /** 抚摸呼噜加成的到期时刻（performance.now 基准）；0 = 无加成 */
   private pettingUntil = 0;
-  /** 甩墙相位机（仅由 injure() 显式触发；连点永不触发） */
-  private injury: { phase: 'fly' | 'hold' | 'return'; start: number; dir: 1 | -1 } | null = null;
+  /** 甩墙相位机（仅由 pratfall() 显式触发；连点永不触发） */
+  private pratfallState: { phase: 'fly' | 'hold' | 'return'; start: number; dir: 1 | -1 } | null = null;
 
   /** 粒子（开心时的星星 / 恢复时的光点） */
   private particles: { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; hue: number; size: number }[] = [];
@@ -348,12 +348,12 @@ export class PetRenderer {
    * 触碰（单击）：压平反馈 + 少量粒子 + 连点计数。
    * 不再产生任何文字气泡——触碰只触发表情/形变变化。
    *
-   * 连点语义 = **抚摸**（正向反馈），永不触发受伤。
+   * 连点语义 = **抚摸**（正向反馈），永不触发跌倒。
    * PETTING_WINDOW_MS 内点满 PETTING_CLICKS 次 → 呼噜加成：
    * 嘴型上扬 + 轻柔震颤 + 暖色粒子，PETTING_BOOST_MS 内衰减。
    *
-   * 受伤态只能由 injure() 显式触发（当前无调用方，保留 API 供未来
-   * 由「真实负向事件」驱动，例如连续拒绝恢复建议 —— 而非用户的手）。
+   * 跌倒态只能由 pratfall() 显式触发（触发源 = 强意图手势，见后续提交；
+   * 连点/普通拖拽/领域事件均**永不**触发 —— R10 / R11 修订版）。
    */
   poke(): void {
     const now = performance.now();
@@ -370,17 +370,18 @@ export class PetRenderer {
   }
 
   /**
-   * 显式触发甩墙受伤（三段：fly → hold → return，X 眼 + 绷带）。
+   * 显式触发甩墙跌倒（三段：fly → hold → return，X 眼 + 绷带 —— 视觉待重做）。
    *
-   * 🔴 与 poke() 彻底解耦：连点不调用本方法，拖动不调用本方法。
-   * 未来若要接线，触发源必须是**领域事件**（如连续拒绝恢复建议），
-   * 不能是用户的手部动作 —— 用户的手永远只能得到正向反馈。
+   * 🔴 与 poke() 彻底解耦：连点不调用本方法。
+   * R11 修订版：跌倒态是纯喜剧彩蛋，**永不**由领域事件、单击或连点触发；
+   * 仅可由强意图手势（拖拽超距 + 3s 内方向反转 ≥3 次）触发（下一提交接线）。
+   * 不落库、不改精力 —— 本状态机纯本地，是 R11 的技术保障，不得改变。
    */
-  injure(): void {
-    if (this.injury) return; // 受伤期间不重复触发
+  pratfall(): void {
+    if (this.pratfallState) return; // 跌倒期间不重复触发
     this.pettingUntil = 0;    // 打断呼噜加成
     this.clickTimes = [];
-    this.injury = { phase: 'fly', start: performance.now(), dir: Math.random() < 0.5 ? -1 : 1 };
+    this.pratfallState = { phase: 'fly', start: performance.now(), dir: Math.random() < 0.5 ? -1 : 1 };
   }
 
   /** 拖拽开始：进入黏性形变模式 */
@@ -436,12 +437,12 @@ export class PetRenderer {
     const baseY = H - 34;
     const bodyR = Math.min(52 + p.energy * 0.6, H * 0.32);
     // 受伤甩墙态：本体贴在侧墙平铺（旋转 90° + 压扁），命中区覆盖贴墙后的范围
-    if (this.injury) {
+    if (this.pratfallState) {
       const hw = bodyR * 0.85;
       const hh = bodyR * 1.6;
-      const flyX = this.injury.dir * Math.max(0, W - hw - 4 - cx);
+      const flyX = this.pratfallState.dir * Math.max(0, W - hw - 4 - cx);
       const lift = Math.max(0, baseY - (H - 4 - hh));
-      const q = this.injury.phase === 'fly' ? 0.5 : 1;
+      const q = this.pratfallState.phase === 'fly' ? 0.5 : 1;
       const bx = cx + flyX * q;
       const by = baseY - lift * q;
       const left = bx - hw * 1.5 - 6;
@@ -538,14 +539,14 @@ export class PetRenderer {
     this.dragStretch.y = lerp(this.dragStretch.y, tSY, sK);
 
     // 甩墙受伤相位机：fly（飞向墙）→ hold（贴墙 8s）→ return（弹性复位）
-    if (this.injury) {
-      const age = now - this.injury.start;
-      if (this.injury.phase === 'fly' && age >= INJURY_FLY_MS) {
-        this.injury = { ...this.injury, phase: 'hold', start: now };
-      } else if (this.injury.phase === 'hold' && age >= INJURY_HOLD_MS) {
-        this.injury = { ...this.injury, phase: 'return', start: now };
-      } else if (this.injury.phase === 'return' && age >= INJURY_RETURN_MS) {
-        this.injury = null;
+    if (this.pratfallState) {
+      const age = now - this.pratfallState.start;
+      if (this.pratfallState.phase === 'fly' && age >= PRATFALL_FLY_MS) {
+        this.pratfallState = { ...this.pratfallState, phase: 'hold', start: now };
+      } else if (this.pratfallState.phase === 'hold' && age >= PRATFALL_HOLD_MS) {
+        this.pratfallState = { ...this.pratfallState, phase: 'return', start: now };
+      } else if (this.pratfallState.phase === 'return' && age >= PRATFALL_RETURN_MS) {
+        this.pratfallState = null;
       }
     }
 
@@ -596,24 +597,24 @@ export class PetRenderer {
     let injRot = 0;
     let injSx = 1;
     let injSy = 1;
-    const injured = this.injury !== null;
-    if (this.injury) {
+    const pratfalling = this.pratfallState !== null;
+    if (this.pratfallState) {
       // 旋转 90° 后的半宽（本地 Y 轴 → 水平）与半高（本地 X 轴 → 垂直）
       const hw = bodyR * 0.85;
       const hh = bodyR * 1.6;
       // 贴墙：本体外缘正好触到画布侧边；抬升：旋转后的底边不出画布下沿
-      const flyX = this.injury.dir * Math.max(0, W - hw - 4 - cx);
+      const flyX = this.pratfallState.dir * Math.max(0, W - hw - 4 - cx);
       const lift = Math.max(0, baseY - (H - 4 - hh));
-      const age = now - this.injury.start;
+      const age = now - this.pratfallState.start;
       let q: number; // 0=原位 1=完全贴墙
-      if (this.injury.phase === 'fly') q = easeOut(Math.min(1, age / INJURY_FLY_MS));
-      else if (this.injury.phase === 'hold') q = 1;
-      else q = 1 - easeInOut(Math.min(1, age / INJURY_RETURN_MS));
+      if (this.pratfallState.phase === 'fly') q = easeOut(Math.min(1, age / PRATFALL_FLY_MS));
+      else if (this.pratfallState.phase === 'hold') q = 1;
+      else q = 1 - easeInOut(Math.min(1, age / PRATFALL_RETURN_MS));
       injDx = flyX * q;
-      injRot = this.injury.dir * q * (Math.PI / 2);
+      injRot = this.pratfallState.dir * q * (Math.PI / 2);
       injSx = 1 + 0.5 * q;
       injSy = 1 - 0.42 * q;
-      injDy = lift * q + (this.injury.phase === 'hold' ? Math.sin(now / 300) * 1.2 : 0);
+      injDy = lift * q + (this.pratfallState.phase === 'hold' ? Math.sin(now / 300) * 1.2 : 0);
     }
 
     // ── 拖拽黏性形变：沿速度方向拉伸（鼻涕质感），松手慢速回弹 ──
@@ -693,13 +694,13 @@ export class PetRenderer {
     // ── 脸 ──
     const faceY = -bodyR * 0.72;
     const eyeDX = bodyR * 0.3;
-    this.drawEyes(ctx, -eyeDX, faceY, bodyR, p, now, injured);
-    this.drawEyes(ctx, eyeDX, faceY, bodyR, p, now, injured);
-    this.drawMouth(ctx, 0, faceY + bodyR * 0.34, bodyR, p, injured);
+    this.drawEyes(ctx, -eyeDX, faceY, bodyR, p, now, pratfalling);
+    this.drawEyes(ctx, eyeDX, faceY, bodyR, p, now, pratfalling);
+    this.drawMouth(ctx, 0, faceY + bodyR * 0.34, bodyR, p, pratfalling);
     // 绷带（受伤态：斜贴额头 + 十字贴布）
-    if (injured) this.drawBandage(ctx, bodyR, p);
+    if (pratfalling) this.drawBandage(ctx, bodyR, p);
     // 腮红（开心时；受伤态不画）
-    if (p.mouthCurve > 0.4 && !injured) {
+    if (p.mouthCurve > 0.4 && !pratfalling) {
       ctx.globalAlpha = Math.min(0.5, (p.mouthCurve - 0.4) * 0.8);
       ctx.fillStyle = '#ff8fa3';
       ctx.beginPath();
@@ -845,11 +846,11 @@ export class PetRenderer {
     return { x: tipX, y: tipY };
   }
 
-  private drawEyes(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, now: number, injured = false): void {
+  private drawEyes(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, now: number, pratfalling = false): void {
     const r = bodyR * 0.115;
     ctx.save();
     ctx.translate(x, y);
-    if (injured) {
+    if (pratfalling) {
       // 眩晕 X 眼
       ctx.strokeStyle = '#2b2b3a';
       ctx.lineWidth = 2.6;
@@ -899,7 +900,7 @@ export class PetRenderer {
     void now;
   }
 
-  private drawMouth(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, injured = false): void {
+  private drawMouth(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, pratfalling = false): void {
     const w = bodyR * 0.3;
     const curve = p.mouthCurve;
     ctx.save();
@@ -908,7 +909,7 @@ export class PetRenderer {
     ctx.lineWidth = 2.8;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    if (injured) {
+    if (pratfalling) {
       // 眩晕波浪嘴
       ctx.moveTo(-w, 0);
       ctx.quadraticCurveTo(-w * 0.5, w * 0.35, 0, 0);
