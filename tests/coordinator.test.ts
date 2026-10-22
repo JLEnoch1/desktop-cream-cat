@@ -277,7 +277,9 @@ test('coordinator: 情绪合成随精力变化（三层 + 天气显示门槛）'
     c.ledger.setEnergy(9);
     const sunny = c.buildState().emotion;
     assert.equal(sunny.overlay, 'sunbeam');
-    // 拉低精力 → pulse 激活（阈值 3）
+    // 门槛已废除（Q1）：9 分也激活（旧行为下 9 >= 3 是 false）
+    assert.equal(sunny.pulseActive, true);
+    // 拉低精力 → 依旧激活（激活状态不再随精力翻转）
     c.ledger.setEnergy(2);
     const lo = c.buildState().emotion;
     assert.equal(lo.pulseActive, true);
