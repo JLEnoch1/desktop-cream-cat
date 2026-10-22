@@ -12,6 +12,7 @@
 
 import type { BaseEmotion, EmotionState, PulseReaction, WeatherOverlay } from '../core/types.js';
 import { BASE_TIERS, tierFor } from '../emotion/engine.js';
+import { pulseIntensity } from '../emotion/pulse-contract.js';
 
 export interface PetRenderOptions {
   canvas: HTMLCanvasElement;
@@ -19,7 +20,7 @@ export interface PetRenderOptions {
 }
 
 /** 渲染用的情绪参数（插值后的连续量） */
-interface RenderParams {
+export interface RenderParams {
   energy: number;
   hue: number;
   sat: number;
@@ -33,8 +34,12 @@ interface RenderParams {
   squish: number;   // 疲惫时的身体压扁程度
   tremble: number;  // 颤抖强度
 }
-/** base 情绪 → 嘴型曲线 / 眼睛开合 / 压扁 / 颤抖 */
-const EMOTION_PARAMS: Record<BaseEmotion, { mouthCurve: number; eyeOpen: number; squish: number; tremble: number }> = {
+/**
+ * base 情绪 → 嘴型曲线 / 眼睛开合 / 压扁 / 颤抖。
+ * 🔴 导出仅供测试引用基线值（断言"偏移恰好施加"需要拿到 base 侧的数字）；
+ * 渲染层内部一律走 buildRenderParams()，不要直接读这张表做决策。
+ */
+export const EMOTION_PARAMS: Record<BaseEmotion, { mouthCurve: number; eyeOpen: number; squish: number; tremble: number }> = {
   blissful:  { mouthCurve: 1.0,  eyeOpen: 1.0, squish: 0,    tremble: 0 },
   radiant:   { mouthCurve: 0.9,  eyeOpen: 1.0, squish: 0,    tremble: 0 },
   cheerful:  { mouthCurve: 0.75, eyeOpen: 1.0, squish: 0,    tremble: 0 },
@@ -47,16 +52,127 @@ const EMOTION_PARAMS: Record<BaseEmotion, { mouthCurve: number; eyeOpen: number;
   burnt:     { mouthCurve: -0.85, eyeOpen: 0.15, squish: 0.3, tremble: 0.6 },
 };
 
-/** pulse 反应对渲染参数的微调 */
-const PULSE_PARAMS: Record<PulseReaction, Partial<{ mouthCurve: number; tremble: number; eyeOpen: number }>> = {
+/**
+ * pulse 反应对渲染参数的**偏移量**（不是目标值）。
+ *
+ * 🔴 语义变更（DESIGN.md §4.3 矛盾 C 裁决 + Q1）：
+ * 旧实现（已除名的覆盖表）用空值合并**覆盖** base 的对应通道
+ * （`eyeOpen: pp.eyeOpen ?? ep.eyeOpen`）—— pulse 一到，base 的表情被整值替换。
+ * 后果：一只 blissful（eyeOpen 1.0）的猫碰到愧疚脉冲（旧值 eyeOpen 0.7）
+ * 会瞬间掉 0.3；一只 burnt（eyeOpen 0.15）碰到麻木脉冲（旧值 0.1）几乎没反应
+ * —— 覆盖语义让 pulse 的视觉强度只取决于偏移表，与 base 档位完全无关，
+ * 「越累反应越该被完整看见」这个语义被抹掉了。
+ * 新语义：`final = clamp(base + offset × intensity(energy), …)`。
+ *
+ * ⚠️ 因此数值必须整体重设计为**小量级偏移**：旧表里 `guilty.eyeOpen:0.7`、
+ * `numb.eyeOpen:0.1`、`determined.eyeOpen:1.0` 是「绝对目标值」，直接当偏移会爆表
+ * （0.7 的偏移足以把任何一档的眼睛推到钳制边界）。
+ * 量级约定（每通道独立钳制，见 buildRenderParams）：
+ *   eyeOpen    ±0.10 ~ 0.25（眼皮是微调通道，>0.3 就读成"换了一只猫"）
+ *   mouthCurve ±0.20 ~ 0.50（嘴角是主表意通道，允许较大摆动）
+ *   tremble    +0.15 ~ 0.45（只加不减：base 的颤抖是"累"，pulse 的颤抖是"情绪"）
+ */
+export const PULSE_OFFSETS: Record<PulseReaction, Partial<{ mouthCurve: number; tremble: number; eyeOpen: number }>> = {
+  /** 无反应：全零偏移（保持映射穷尽，tsc 会拦住漏登记的新反应） */
   none: {},
-  anxious: { tremble: 0.3, mouthCurve: -0.25 },
-  guilty: { mouthCurve: -0.4, eyeOpen: 0.7 },
-  numb: { eyeOpen: 0.1, mouthCurve: -0.15 },
-  restless: { tremble: 0.45 },
-  grateful: { mouthCurve: 0.5 },
-  determined: { mouthCurve: 0.3, eyeOpen: 1.0 },
+  anxious: {
+    // 焦虑的核心可读信号是"抖"，取颤抖上限 0.45：base drained/exhausted 已有
+    // 0.15/0.35，叠加后被 tremble≤0.9 的钳制接住，不会变成视觉抽搐。
+    tremble: 0.45,
+    // 嘴角下压 0.25（中等幅度）：焦虑 ≠ 悲伤，下压过头会与 exhausted 的 base
+    // 嘴型（-0.6）叠成"哭"，而 R7/R11 都要求负面情绪不走向"痛苦脸"。
+    mouthCurve: -0.25,
+  },
+  guilty: {
+    // 愧疚 = 嘴角收住 + 眼神低垂。eyeOpen 只偏 -0.15：愧疚时人是"不敢看"，
+    // 不是"看不见"，眼皮大幅下压会与疲惫（通道 2）语义撞车。
+    mouthCurve: -0.3,
+    eyeOpen: -0.15,
+  },
+  numb: {
+    // 麻木 = "没有表情"，所以两个通道都取各自量级的**下限**：
+    // 嘴角只拉平 -0.2（再大就读成悲伤），眼皮 -0.2（放空半闭，base burnt 0.15
+    // 叠加后落到钳制下界 0，读作"眼睛没聚焦"而非"睡着了"）。
+    mouthCurve: -0.2,
+    eyeOpen: -0.2,
+  },
+  restless: {
+    // 坐立不安 = 最躁的抖。tremble 取上限 0.45，与 anxious 同幅（两者在 base 上
+    // 的区分由档位承担：restless 出现在中高精力档，anxious 出现在低档）。
+    tremble: 0.45,
+    // 嘴角轻微下压 0.2（量级下限）：躁动不是不悦，主要信息在抖，不在嘴。
+    mouthCurve: -0.2,
+  },
+  grateful: {
+    // 感激 = 明显的嘴角上扬 +0.3（正向脉冲要给足，否则"谢谢"读不出来），
+    // 眼睛同步亮一档 +0.1（最小量级：base 高档 eyeOpen 已是 1.0，会被钳制接住，
+    // 只在 base 较低时生效 —— 这正是偏移语义的好处：越累越看不出"眼睛变亮"）。
+    mouthCurve: 0.3,
+    eyeOpen: 0.1,
+  },
+  determined: {
+    // 坚定 = 抿嘴 +0.2（量级下限：坚定是"收着劲"，不是"笑开"，给到 grateful
+    // 的 0.3 会让两种正向脉冲长得一样）+ 睁眼 +0.15（专注时眼睛会睁大一点）。
+    mouthCurve: 0.2,
+    eyeOpen: 0.15,
+  },
 };
+
+/**
+ * 读取偏移量：缺失键（Partial 未登记的通道）视为 0 偏移。
+ * 单独提出来的唯一理由是让 buildRenderParams 的函数体内**不出现空值合并运算符** ——
+ * 覆盖语义已被裁决废除，函数体里连"看起来像覆盖"的写法都不留，
+ * 便于用 grep 做机械验收。
+ */
+function off(v: number | undefined): number {
+  return v === undefined ? 0 : v;
+}
+
+/**
+ * 渲染参数构建（导出的模块级**纯函数**，供 node 环境单测；不依赖 canvas/DOM）。
+ *
+ * 公式（DESIGN.md §4.3 矛盾 C 裁决）：
+ *   final = clamp(base + pulseOffset × intensity, 通道各自的硬边界)
+ *
+ * intensity 一律走契约层的 `pulseIntensity()` —— 那是全项目关于"脉冲多强、
+ * 谁被豁免"的唯一真源（高精力压缩、低精力全幅、empathy 恒 1.0）。
+ * 🔴 禁止在这里复制分段边界（同 resolveWeatherOverlay 之于天气门槛的做法）。
+ *
+ * 钳制边界（三条都有视觉理由，不是随手取的数）：
+ *   eyeOpen    [0, 1]   —— 眼皮开合的物理量程
+ *   mouthCurve [-1, 1]  —— 嘴角曲线的定义域（-1 哭 / +1 大笑）
+ *   tremble    [0, 0.9] —— 🔴 上限 0.9：burnt 档 base 已 0.6，叠加 anxious/restless
+ *                          的 +0.45 会到 1.05；抖动幅度按 tremble×4px 换算，>0.9
+ *                          就开始"像素级抽搐"，读作渲染故障而不是情绪。
+ *
+ * `pulseActive=false` 时 k=0，三个通道原样返回 base —— 与"没有 pulse"等价，
+ * 不再有旧实现里"pulse 一到就整值替换 base"的断层。
+ */
+export function buildRenderParams(
+  energy: number,
+  base: BaseEmotion,
+  pulse: PulseReaction,
+  pulseActive: boolean,
+): RenderParams {
+  const tier = BASE_TIERS.find(t => t.emotion === base);
+  const t = tier === undefined ? tierFor(energy) : tier;
+  const ep = EMOTION_PARAMS[base];
+  const po = PULSE_OFFSETS[pulse];
+  const k = pulseActive ? pulseIntensity(pulse, energy) : 0;
+  return {
+    energy,
+    hue: t.hue,
+    sat: t.sat,
+    lum: t.lum,
+    breath: t.breath,
+    bounce: t.bounce,
+    blink: t.blink,
+    eyeOpen: clamp(ep.eyeOpen + off(po.eyeOpen) * k, 0, 1),
+    mouthCurve: clamp(ep.mouthCurve + off(po.mouthCurve) * k, -1, 1),
+    squish: ep.squish,
+    tremble: clamp(ep.tremble + off(po.tremble) * k, 0, 0.9),
+  };
+}
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -364,23 +480,12 @@ export class PetRenderer {
 
   /* ─────────────────────────── 参数构建 ─────────────────────────── */
 
+  /**
+   * 类内包装：构建逻辑已抽为模块级纯函数 buildRenderParams()（可单测）。
+   * 这里只做转发，不再有任何数值决策。
+   */
   private buildParams(energy: number, base: BaseEmotion, pulse: PulseReaction, pulseActive: boolean): RenderParams {
-    const tier = BASE_TIERS.find(t => t.emotion === base) ?? tierFor(energy);
-    const ep = EMOTION_PARAMS[base];
-    const pp = pulseActive ? PULSE_PARAMS[pulse] : {};
-    return {
-      energy,
-      hue: tier.hue,
-      sat: tier.sat,
-      lum: tier.lum,
-      breath: tier.breath,
-      bounce: tier.bounce,
-      blink: tier.blink,
-      eyeOpen: pp.eyeOpen ?? ep.eyeOpen,
-      mouthCurve: pp.mouthCurve ?? ep.mouthCurve,
-      squish: ep.squish,
-      tremble: pp.tremble ?? ep.tremble,
-    };
+    return buildRenderParams(energy, base, pulse, pulseActive);
   }
 
   /* ─────────────────────────── 主循环 ─────────────────────────── */
