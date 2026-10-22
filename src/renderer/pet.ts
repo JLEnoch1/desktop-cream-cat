@@ -128,6 +128,52 @@ function off(v: number | undefined): number {
   return v === undefined ? 0 : v;
 }
 
+/* ─────────────── base 低档「趴窝态」增强变体（T12 累瘫视觉正向落地） ───────────────
+ *
+ * 裁决（§5.3.4 理由① + 绷带视觉重设计段末）：「你太久没休息」的信息已由 base
+ * 低档承载，镜子不需要第二套词汇。累瘫视觉（眼皮沉重 / 融化式瘫软 / 缓慢起伏）
+ * 并入 base 低档，作为**趴窝态增强变体**——是 base 参数的连续增强，不是新状态机、
+ * 不落库、精力回升自然恢复、无任何文案、不触发 toast。
+ *
+ * 🔴 R11 三判据：
+ *   拟物化非拟人痛苦 —— 只有融化式瘫软，无泪痕 / 悲伤下垂眼角 / 真实伤口；
+ *   可逆且自愈 —— base 的连续函数，精力回升即自然恢复，无独立状态机；
+ *   不指向用户 —— 无任何文案。
+ *
+ * 🔴 R7：疲惫只通过 squish / eyeOpen / breath 表达，绝不碰 hue/sat/lum。
+ * 🔴 与抚摸眯眼的一致性（resolveEarPose 已踩过的坑）：lidDroop 压低 eyeOpen，
+ *    而 resolveEarPose 的 droop 项已按 (1 - joy) 门控——被抚摸到呼噜的低精力猫
+ *    joy 高、droopPull≈0，不会因 lidDroop 被压成飞机耳。趴窝的「眼皮沉重」与
+ *    抚摸的「享受眯眼」数值同向叠加，语义由 ear 门控区分，不会打架。
+ */
+/** 趴窝变体档位边界（G5/Q10）：裁决原文写「0-1 档」，量程 0–10 下按 Q10 建议
+ *  取 energy<2.5（exhausted+burnt 两档）为趴窝；drained(2.5–3.4) 为「蔫」（区分度对比对象）。待用户确认。 */
+const LOW_TIER_PRONE_MAX = 2.5;
+
+/**
+ * 趴窝变体三通道增强系数（纯函数，导出供单测）。
+ *
+ * @param energy 精力值（浮点）
+ * @returns lidDroop 叠加到 eyeOpen（眼皮沉重）、meltSquish 叠加到 squish（融化式瘫软）、
+ *   breathScale 乘到 breath（缓慢起伏，>=1）。energy >= 2.5 返回 {0, 0, 1}（蔫档及以上不生效）。
+ */
+export function resolveProneVariant(energy: number): {
+  lidDroop: number;
+  meltSquish: number;
+  breathScale: number;
+} {
+  // 趴窝深度 d：energy 2.5→0、0→1，线性单调；越界（burnt min=-1）钳到 1。
+  const d = clamp(1 - energy / LOW_TIER_PRONE_MAX, 0, 1);
+  // 钳制理由：lidDroop 使 burnt 档 eyeOpen 0.15→0（安详全闭，眼神光仍在，见 drawEyes）；
+  // meltSquish 使 burnt 档 squish 0.3→0.45（再高画穿影子线）；breathScale 使 burnt 档
+  // breath 6.5s→约 10.4s（缓慢起伏，周期不越 2.0 上限）。
+  return {
+    lidDroop: d * 0.25,
+    meltSquish: d * 0.15,
+    breathScale: 1 + d * 0.6,
+  };
+}
+
 /**
  * 渲染参数构建（导出的模块级**纯函数**，供 node 环境单测；不依赖 canvas/DOM）。
  *
@@ -159,17 +205,18 @@ export function buildRenderParams(
   const ep = EMOTION_PARAMS[base];
   const po = PULSE_OFFSETS[pulse];
   const k = pulseActive ? pulseIntensity(pulse, energy) : 0;
+  const prone = resolveProneVariant(energy);
   return {
     energy,
     hue: t.hue,
     sat: t.sat,
     lum: t.lum,
-    breath: t.breath,
+    breath: t.breath * prone.breathScale,
     bounce: t.bounce,
     blink: t.blink,
-    eyeOpen: clamp(ep.eyeOpen + off(po.eyeOpen) * k, 0, 1),
+    eyeOpen: clamp(ep.eyeOpen + off(po.eyeOpen) * k - prone.lidDroop, 0, 1),
     mouthCurve: clamp(ep.mouthCurve + off(po.mouthCurve) * k, -1, 1),
-    squish: ep.squish,
+    squish: clamp(ep.squish + prone.meltSquish, 0, 0.45),
     tremble: clamp(ep.tremble + off(po.tremble) * k, 0, 0.9),
   };
 }

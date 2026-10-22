@@ -16,6 +16,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { BASE_TIERS, WARM_HUE_MIN, WARM_HUE_MAX } from '../src/emotion/engine.js';
+import { resolveProneVariant } from '../src/renderer/pet.js';
 
 test('BASE_TIERS: hue 全程暖区间（金渐层），任何一档越界即失败（R7）', () => {
   for (const t of BASE_TIERS) {
@@ -77,4 +78,45 @@ test('BASE_TIERS: hue 总跨度 ≤ 20（色相保持暖区间而非大幅变化
     span <= 20,
     `hue 跨度 ${span} > 20 —— 色相只允许在暖区间内微移，疲惫的表达职责在通道 1/2/4 与 sat/lum`,
   );
+});
+
+/* ─────────────────── B5 · 趴窝变体 resolveProneVariant ─────────────────── */
+
+test('趴窝变体: 档位边界——energy<2.5 生效（三通道非零），>=2.5 不生效', () => {
+  const prone = resolveProneVariant(2.4);
+  assert.ok(prone.lidDroop > 0 && prone.meltSquish > 0 && prone.breathScale > 1,
+    `energy=2.4 应进入趴窝，实际 ${JSON.stringify(prone)}`);
+  const wilted = resolveProneVariant(2.6);
+  assert.equal(wilted.lidDroop, 0);
+  assert.equal(wilted.meltSquish, 0);
+  assert.equal(wilted.breathScale, 1);
+});
+
+test('趴窝变体: 区分度——energy=1（趴窝）与 energy=3（蔫）可辨差值 ≥0.08', () => {
+  const prone = resolveProneVariant(1);
+  const wilted = resolveProneVariant(3);
+  const squishDiff = prone.meltSquish - wilted.meltSquish;
+  const eyeDiff = prone.lidDroop - wilted.lidDroop;
+  // 阈值 0.08：肉眼在 104–116px 身体上能分辨的最小参数差，两档必须分得开
+  assert.ok(squishDiff >= 0.08 || eyeDiff >= 0.08,
+    `趴窝(energy=1)与蔫(energy=3)可辨差值不足：squishDiff=${squishDiff}, eyeDiff=${eyeDiff}`);
+});
+
+test('趴窝变体: 单调性——energy 2.4→0 扫描，lidDroop 与 meltSquish 单调不减', () => {
+  let prevDrop = -Infinity;
+  let prevMelt = -Infinity;
+  for (let e = 2.4; e >= 0; e -= 0.2) {
+    const v = resolveProneVariant(e);
+    assert.ok(v.lidDroop >= prevDrop, `lidDroop 在 energy=${e} 出现回升`);
+    assert.ok(v.meltSquish >= prevMelt, `meltSquish 在 energy=${e} 出现回升`);
+    prevDrop = v.lidDroop;
+    prevMelt = v.meltSquish;
+  }
+});
+
+test('趴窝变体: 钳制——burnt 档 min(-1) 三通道均在范围内', () => {
+  const v = resolveProneVariant(-1);
+  assert.ok(v.lidDroop <= 0.25 && v.lidDroop >= 0, `lidDroop 越界 ${v.lidDroop}`);
+  assert.ok(v.meltSquish <= 0.15 && v.meltSquish >= 0, `meltSquish 越界 ${v.meltSquish}`);
+  assert.ok(v.breathScale <= 2.0 && v.breathScale >= 1, `breathScale 越界 ${v.breathScale}`);
 });

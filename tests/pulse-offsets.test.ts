@@ -206,7 +206,10 @@ test("none 反应 → 全零偏移（任何档位都不改变 base 表情）", (
   assert.deepEqual(PULSE_OFFSETS.none, {});
   for (let e = 0; e <= 10; e += 1) {
     const p = buildRenderParams(e, 'weary', 'none', true);
-    assert.equal(p.eyeOpen, EMOTION_PARAMS.weary.eyeOpen);
+    // eyeOpen 在低档会叠加趴窝变体的 lidDroop（base 层增强，非 pulse 偏移），
+    // 故与「无 pulse 的 base 渲染」比较，而非与裸 EMOTION_PARAMS 比较。
+    const baseOnly = buildRenderParams(e, 'weary', 'none', false);
+    assert.equal(p.eyeOpen, baseOnly.eyeOpen);
     assert.equal(p.mouthCurve, EMOTION_PARAMS.weary.mouthCurve);
     assert.equal(p.tremble, EMOTION_PARAMS.weary.tremble);
   }
