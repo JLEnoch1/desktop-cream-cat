@@ -6,7 +6,7 @@
  */
 
 import { PetRenderer } from './pet.js';
-import { tierFor, PULSE_THRESHOLD, describe as describeEmotion } from '../emotion/engine.js';
+import { tierFor, describe as describeEmotion } from '../emotion/engine.js';
 import { ENERGY_MAX } from '../core/types.js';
 import type { AppState, PendingSlide, InsightRecommendation, WeeklyReportPayload, RecoveryItem, AdjustWindow, TaskDurationRequest } from '../core/types.js';
 
@@ -1158,6 +1158,9 @@ function renderRecommendations(recs: InsightRecommendation[]): void {
 
 /* ─────────────────────────── 主状态渲染 ─────────────────────────── */
 
+/** 低精力提醒的 UI 阈值（与已废除的 pulse 激活门槛无关，Q1 裁决后二者解耦） */
+const LOW_ENERGY_TOAST_AT = 3;
+
 function applyState(s: AppState): void {
   const prev = state;
   state = s;
@@ -1228,8 +1231,8 @@ function applyState(s: AppState): void {
   // 晨间基线：卡片本身就是问候，不再叠加文字气泡
 
   // 低精力提示（跨过阈值时）：仅 toast，不弹文字气泡
-  if (prev && prev.energy >= PULSE_THRESHOLD && s.energy < PULSE_THRESHOLD) {
-    toast(`电量低于 ${PULSE_THRESHOLD} 分了，要不要休息一下？`, 3200);
+  if (prev && prev.energy >= LOW_ENERGY_TOAST_AT && s.energy < LOW_ENERGY_TOAST_AT) {
+    toast(`电量低于 ${LOW_ENERGY_TOAST_AT} 分了，要不要休息一下？`, 3200);
   }
 }
 

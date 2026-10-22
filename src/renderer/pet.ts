@@ -11,7 +11,7 @@
  */
 
 import type { BaseEmotion, EmotionState, PulseReaction, WeatherOverlay } from '../core/types.js';
-import { BASE_TIERS, PULSE_THRESHOLD, tierFor } from '../emotion/engine.js';
+import { BASE_TIERS, tierFor } from '../emotion/engine.js';
 
 export interface PetRenderOptions {
   canvas: HTMLCanvasElement;
@@ -215,7 +215,8 @@ export class PetRenderer {
   /** 滑块预览：直接按投影精力驱动表情（实时变化） */
   setPreview(energy: number): void {
     const tier = tierFor(energy);
-    const pulseActive = energy < PULSE_THRESHOLD;
+    // 门槛已废除(Q1)，预览态全档激活
+    const pulseActive = true;
     this.target = this.buildParams(energy, tier.emotion, pulseActive ? this.pulse : 'none', pulseActive);
   }
 
