@@ -1158,7 +1158,8 @@ function renderRecommendations(recs: InsightRecommendation[]): void {
 
 /* ─────────────────────────── 主状态渲染 ─────────────────────────── */
 
-/** 低精力提醒的 UI 阈值（与已废除的 pulse 激活门槛无关，Q1 裁决后二者解耦） */
+/** 低精力提醒的 UI 阈值（与已废除的 pulse 激活门槛无关，Q1 裁决后二者解耦）。
+ *  本常量只服务这条 toast；pulse 已全档激活，不再有门槛。 */
 const LOW_ENERGY_TOAST_AT = 3;
 
 function applyState(s: AppState): void {
