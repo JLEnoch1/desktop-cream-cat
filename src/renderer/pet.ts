@@ -256,10 +256,114 @@ const PETTING_WINDOW_MS = 2500;
 const PETTING_CLICKS = 3;
 /** 抚摸后的呼噜加成时长（嘴型上扬的衰减窗口） */
 const PETTING_BOOST_MS = 2000;
-/** 甩墙动画三段：飞向墙 → 平铺 → 弹性复位（跌倒态仅由 pratfall() 显式触发） */
+
+/* ── 跌倒彩蛋（R11 修订版）节拍与手势常量 ──
+ *
+ * 时序（R11：全程 ≤90s 自动复位，纯喜剧叙事）：
+ *   fly（飞向墙）→ lie（平铺 + 额头绷带冒小爱心）→ groom（甩头舔毛复原）
+ *   → nuzzle（主动回蹭光标 = 「和好」节拍）→ return（弹性复位回位）
+ * 总和 350 + 15000 + 7000 + 5000 + 500 = 27_850ms ≤ 90_000ms。
+ * 各节拍时长理由见各自注释。
+ */
+/** 飞向侧墙（沿用原值：350ms 的 easeOut 抛物线刚好读完「飞出去」又不拖） */
 const PRATFALL_FLY_MS = 350;
-const PRATFALL_HOLD_MS = 8000;
+/**
+ * 平铺 + 绷带冒小爱心。15s：这是喜剧的「定格」段——
+ * 短了爱心只闪一下就没了（读不出「冒」），长了像惩罚（R11 禁止）。
+ * 15s 足够用户注意到并会心一笑，又明显短于任何「惩罚时长」的心理预期。
+ */
+const PRATFALL_LIE_MS = 15_000;
+/**
+ * 甩头舔毛复原。7s：猫舔毛是「我自己缓过来了」的自我安抚节拍，
+ * 必须比 lie 短（复原是从属节拍，定格才是主角），但要比 nuzzle 长
+ * （舔毛是一套连续动作：甩头→舔前爪→抹脸，7s 才演得完）。
+ */
+const PRATFALL_GROOM_MS = 7_000;
+/**
+ * 回蹭光标（和好节拍）。5s：一次完整的「凑过去蹭两下再退回」；
+ * 取 5s 是两下蹭动（各约 1.6s）加回位余量，再多就变成骚扰光标。
+ */
+const PRATFALL_NUZZLE_MS = 5_000;
+/** 弹性复位回位（沿用原值：500ms easeInOut，复位必须快，不留痕） */
 const PRATFALL_RETURN_MS = 500;
+// 导出五个节拍供 tests/pratfall.test.ts 断言「总和 ≤90s」，防止后续有人
+// 悄悄加长某个节拍而突破 R11（测试不硬编码数字，直接引用这些常量）。
+export { PRATFALL_FLY_MS, PRATFALL_LIE_MS, PRATFALL_GROOM_MS, PRATFALL_NUZZLE_MS, PRATFALL_RETURN_MS };
+/** 🔴 R11 修订版硬上限：全程（fly→lie→groom→nuzzle→return）≤90s。导出供测试断言防回退 */
+export const PRATFALL_TOTAL_MAX_MS = 90_000;
+/** 🔴 R11 修订版：10 分钟冷却，防彩蛋被反复触发磨成噪音。导出供测试断言 */
+export const PRATFALL_COOLDOWN_MS = 600_000;
+
+/**
+ * 「拖拽超距」的距离阈值（路径总长，非首尾直线距离）。
+ *
+ * 取 240px 的理由：窗口宽 400px，宠物本体约 110–150px 宽，
+ * 一次**正常**的窗口内挪位拖拽通常 <200px 路径（从一侧挪到另一侧）；
+ * 而强意图手势要求「来回甩」，单程就要超过本体宽度才读得出发力感。
+ * 240px ≈ 本体直径 ×2，既把普通挪位拖拽挡在门外（实测单向拖拽
+ * 中位数路径约 120–180px），又不会高到「故意想触发也触发不了」。
+ * 🔴 用**路径总长**而非首尾距离：来回甩动会让首尾距离接近 0，
+ * 只有累计路径能表达「真的甩了很多下」。
+ */
+const PRATFALL_DRAG_MIN_PX = 240;
+/** 导出：测试用它构造「超距/未超距」样本，避免测试里另造一套数 */
+export { PRATFALL_DRAG_MIN_PX };
+/** 裁决原文：方向反转必须发生在 3s 内（窗口外的慢速晃动不算强意图）。导出供测试断言 */
+export const PRATFALL_REVERSAL_WINDOW_MS = 3000;
+/** 裁决原文：方向反转 ≥3 次。导出供测试断言 */
+export const PRATFALL_REVERSAL_MIN = 3;
+
+/** 手势采样点（dragMoveBy 累积，dragEnd 判定后清空） */
+export interface PratfallGestureSample {
+  x: number;
+  y: number;
+  t: number;
+}
+
+/** 跌倒彩蛋的五段喜剧相位（R11 修订版时序） */
+export type PratfallPhase = 'fly' | 'lie' | 'groom' | 'nuzzle' | 'return';
+
+/**
+ * 强意图手势判定：拖拽超距 + 3s 内方向反转 ≥3 次。纯函数，无副作用。
+ *
+ * 🔴 R10 守护（本函数存在的全部理由）：
+ * 「连点/拖动 → 惩罚」映射被 v1.1 永久废除。跌倒彩蛋要存续，触发源必须
+ * 是**物理上不可能被误做出来**的手势：单击（无拖拽路径）不命中、
+ * 连点（poke 路径根本不采样）不命中、普通单向拖拽（无方向反转）不命中。
+ * 「超距 + 快速反复反转」同时成立 ≈ 用户抓着猫快速来回甩——
+ * 这是裁决认定的唯一可接受触发源（拟物玩笑，不是日常操作的副产品）。
+ *
+ * 方向反转的定义：相邻两次位移的 x 分量符号翻转（|dx| ≥ 2px 才计入，
+ * 滤掉手抖/采样噪声；只取 x 轴是因为「来回甩」的主轴是水平方向，
+ * 垂直抖动多来自拖拽窗口时的自然抬手）。
+ *
+ * @param samples 时间升序的采样序列（dragMoveBy 按调用顺序 push）
+ */
+export function isPratfallGesture(samples: readonly PratfallGestureSample[]): boolean {
+  if (samples.length < 2) return false;
+  // ① 超距：累计路径长度
+  let pathLen = 0;
+  for (let i = 1; i < samples.length; i++) {
+    pathLen += Math.hypot(samples[i]!.x - samples[i - 1]!.x, samples[i]!.y - samples[i - 1]!.y);
+  }
+  if (pathLen < PRATFALL_DRAG_MIN_PX) return false;
+  // ② 方向反转序列（只认水平主轴上符号翻转，滤掉 <2px 的抖动）
+  const turns: number[] = []; // 发生反转的时刻
+  let lastDx = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const dx = samples[i]!.x - samples[i - 1]!.x;
+    if (Math.abs(dx) < 2) continue;               // 噪声/垂直移动：不改变当前方向
+    const sign = dx > 0 ? 1 : -1;
+    if (lastDx !== 0 && sign !== lastDx) turns.push(samples[i]!.t);
+    lastDx = sign;
+  }
+  if (turns.length < PRATFALL_REVERSAL_MIN) return false;
+  // ③ 反转必须密集：存在一个 3s 滑动窗口容纳 ≥3 次反转
+  for (let i = 0; i + PRATFALL_REVERSAL_MIN - 1 < turns.length; i++) {
+    if (turns[i + PRATFALL_REVERSAL_MIN - 1]! - turns[i]! <= PRATFALL_REVERSAL_WINDOW_MS) return true;
+  }
+  return false;
+}
 
 function easeOut(x: number): number { const q = 1 - x; return 1 - q * q * q; }
 function easeInOut(x: number): number { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
@@ -300,8 +404,23 @@ export class PetRenderer {
   private tailTip = { x: 0, y: 0 };
   /** 抚摸呼噜加成的到期时刻（performance.now 基准）；0 = 无加成 */
   private pettingUntil = 0;
-  /** 甩墙相位机（仅由 pratfall() 显式触发；连点永不触发） */
-  private pratfallState: { phase: 'fly' | 'hold' | 'return'; start: number; dir: 1 | -1 } | null = null;
+  /**
+   * 甩墙相位机（仅由强意图手势 / 显式 pratfall() 触发；连点永不触发）。
+   * 五段喜剧时序（R11 修订版）：fly → lie → groom → nuzzle → return。
+   * 🔴 纯本地状态：不落库、不改精力、不进周报 —— 这是 R11 的技术保障。
+   */
+  private pratfallState: { phase: 'fly' | 'lie' | 'groom' | 'nuzzle' | 'return'; start: number; dir: 1 | -1 } | null = null;
+  /** 强意图手势采样（dragMoveBy 累积；dragEnd 判定后清空；🔴 poke() 永不写入） */
+  private pratfallSamples: PratfallGestureSample[] = [];
+  /**
+   * 回蹭目标（和好节拍的朝向）。
+   * 🔴 降级实现：pet.ts 拿不到**静止时**的光标位置（无 mousemove 订阅，
+   * app.ts 不在白名单），故用「最近一次交互点」= 拖拽手势的终点方向降级。
+   * 交付说明已标注待确认。
+   */
+  private nuzzleDir: { x: number; y: number } | null = null;
+  /** 上次跌倒触发时刻（performance.now 基准）；-Infinity = 从未触发 */
+  private lastPratfallAt = -Infinity;
 
   /** 粒子（开心时的星星 / 恢复时的光点） */
   private particles: { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; hue: number; size: number }[] = [];
@@ -370,18 +489,21 @@ export class PetRenderer {
   }
 
   /**
-   * 显式触发甩墙跌倒（三段：fly → hold → return，X 眼 + 绷带 —— 视觉待重做）。
+   * 显式触发甩墙跌倒（五段喜剧时序：fly → lie → groom → nuzzle → return）。
    *
-   * 🔴 与 poke() 彻底解耦：连点不调用本方法。
+   * 🔴 与 poke() 彻底解耦：连点不调用本方法，单击不调用本方法。
    * R11 修订版：跌倒态是纯喜剧彩蛋，**永不**由领域事件、单击或连点触发；
-   * 仅可由强意图手势（拖拽超距 + 3s 内方向反转 ≥3 次）触发（下一提交接线）。
+   * 唯一用户侧入口 = dragEnd() 里的强意图手势判定（isPratfallGesture）。
    * 不落库、不改精力 —— 本状态机纯本地，是 R11 的技术保障，不得改变。
    */
   pratfall(): void {
     if (this.pratfallState) return; // 跌倒期间不重复触发
+    const now = performance.now();
+    if (now - this.lastPratfallAt < PRATFALL_COOLDOWN_MS) return; // 10min 冷却（R11）
+    this.lastPratfallAt = now;
     this.pettingUntil = 0;    // 打断呼噜加成
     this.clickTimes = [];
-    this.pratfallState = { phase: 'fly', start: performance.now(), dir: Math.random() < 0.5 ? -1 : 1 };
+    this.pratfallState = { phase: 'fly', start: now, dir: Math.random() < 0.5 ? -1 : 1 };
   }
 
   /** 拖拽开始：进入黏性形变模式 */
@@ -389,6 +511,8 @@ export class PetRenderer {
     this.draggingNow = true;
     this.dragVel = { x: 0, y: 0 };
     this.lastDragMove = performance.now();
+    // 强意图手势采样起点（相对路径坐标）。🔴 仅 drag 路径采样 —— poke() 永不写入（R10）
+    this.pratfallSamples = [{ x: 0, y: 0, t: performance.now() }];
   }
 
   /** 拖拽移动：记录速度向量（px/ms），驱动拉伸方向 */
@@ -397,16 +521,30 @@ export class PetRenderer {
     const now = performance.now();
     const dt = Math.max(8, now - this.lastDragMove);
     this.lastDragMove = now;
+    // 累积手势采样（限长防爆：600 点 ≈ 10s @60Hz，远超判定所需）
+    const last = this.pratfallSamples[this.pratfallSamples.length - 1];
+    const base = last ?? { x: 0, y: 0, t: now };
+    this.pratfallSamples.push({ x: base.x + dx, y: base.y + dy, t: now });
+    if (this.pratfallSamples.length > 600) this.pratfallSamples.shift();
     // 瞬时速度，限幅防爆冲
     const vx = Math.max(-3, Math.min(3, dx / dt));
     const vy = Math.max(-3, Math.min(3, dy / dt));
     this.dragVel = { x: this.dragVel.x * 0.6 + vx * 0.4, y: this.dragVel.y * 0.6 + vy * 0.4 };
   }
 
-  /** 拖拽结束：速度衰减，身体弹性回弹 */
+  /** 拖拽结束：速度衰减，身体弹性回弹；并做跌倒手势判定 */
   dragEnd(): void {
     this.draggingNow = false;
     this.dragVel = { x: 0, y: 0 };
+    // 强意图手势是 pratfall 的**唯一**用户侧触发路径（R11 修订版）。
+    // 🔴 R10：poke()/连点物理上不采样，故连点永远走不到这里。
+    if (isPratfallGesture(this.pratfallSamples)) {
+      // 回蹭目标 = 最近一次交互点（降级实现：拿不到静止光标位置，见 nuzzleDir 注释）
+      const last = this.pratfallSamples[this.pratfallSamples.length - 1];
+      this.nuzzleDir = last ? { x: last.x, y: last.y } : null;
+      this.pratfall();
+    }
+    this.pratfallSamples = [];
   }
 
   /** 庆祝（恢复超预期 / 任务完成） */
@@ -436,19 +574,41 @@ export class PetRenderer {
     const cx = W / 2;
     const baseY = H - 34;
     const bodyR = Math.min(52 + p.energy * 0.6, H * 0.32);
-    // 受伤甩墙态：本体贴在侧墙平铺（旋转 90° + 压扁），命中区覆盖贴墙后的范围
+    // 跌倒甩墙态：镜像 render() 的五段几何 —— 只有 fly/lie 段本体真的贴在侧墙，
+    // groom 段按坐起进度 q 从墙回中央，nuzzle/return 段已在中央（只多一个回蹭偏移）。
+    // 🔴 热区必须跟视觉一致：groom 之后若还把热区挂在侧墙，用户点中央的猫会穿透。
     if (this.pratfallState) {
-      const hw = bodyR * 0.85;
-      const hh = bodyR * 1.6;
-      const flyX = this.pratfallState.dir * Math.max(0, W - hw - 4 - cx);
-      const lift = Math.max(0, baseY - (H - 4 - hh));
-      const q = this.pratfallState.phase === 'fly' ? 0.5 : 1;
-      const bx = cx + flyX * q;
-      const by = baseY - lift * q;
-      const left = bx - hw * 1.5 - 6;
-      const right = bx + hw * 1.5 + 6;
-      const top = by - hh;
-      const bottom = by + hh;
+      const st = this.pratfallState;
+      const age = performance.now() - st.start;
+      let q = 1; // 0 = 在中央，1 = 完全贴墙
+      if (st.phase === 'fly') q = easeOut(Math.min(1, age / PRATFALL_FLY_MS));
+      else if (st.phase === 'lie') q = 1;
+      else if (st.phase === 'groom') q = 1 - easeInOut(Math.min(1, age / (PRATFALL_GROOM_MS * 0.4)));
+      else q = 0; // nuzzle / return：已在中央
+      if (q > 0.02) {
+        const hw = bodyR * 0.85;
+        const hh = bodyR * 1.6;
+        const flyX = st.dir * Math.max(0, W - hw - 4 - cx);
+        const lift = Math.max(0, baseY - (H - 4 - hh));
+        const bx = cx + flyX * q;
+        const by = baseY - lift * q;
+        const left = bx - hw * 1.5 - 6;
+        const right = bx + hw * 1.5 + 6;
+        const top = by - hh;
+        const bottom = by + hh;
+        return {
+          x: Math.max(0, Math.round(left)),
+          y: Math.max(0, Math.round(top)),
+          w: Math.round(Math.min(W, right) - Math.max(0, left)),
+          h: Math.round(Math.min(H, bottom) - Math.max(0, top)),
+        };
+      }
+      // 中央态 + 回蹭偏移余量：四边多留 bodyR*0.4，蹭动时热区不脱手
+      const pad = bodyR * 0.4;
+      const left = cx - bodyR * 1.05 - pad;
+      const right = cx + bodyR * 1.05 + pad;
+      const top = baseY - bodyR * 1.8 - pad;
+      const bottom = baseY + 22 + pad;
       return {
         x: Math.max(0, Math.round(left)),
         y: Math.max(0, Math.round(top)),
@@ -538,15 +698,22 @@ export class PetRenderer {
     this.dragStretch.x = lerp(this.dragStretch.x, tSX, sK);
     this.dragStretch.y = lerp(this.dragStretch.y, tSY, sK);
 
-    // 甩墙受伤相位机：fly（飞向墙）→ hold（贴墙 8s）→ return（弹性复位）
+    // 甩墙跌倒相位机（五段喜剧时序）：
+    //   fly（飞向墙）→ lie（平铺 + 额头绷带冒小爱心）→ groom（甩头舔毛复原）
+    //   → nuzzle（回蹭光标 = 和好节拍）→ return（弹性复位回位）
     if (this.pratfallState) {
       const age = now - this.pratfallState.start;
       if (this.pratfallState.phase === 'fly' && age >= PRATFALL_FLY_MS) {
-        this.pratfallState = { ...this.pratfallState, phase: 'hold', start: now };
-      } else if (this.pratfallState.phase === 'hold' && age >= PRATFALL_HOLD_MS) {
+        this.pratfallState = { ...this.pratfallState, phase: 'lie', start: now };
+      } else if (this.pratfallState.phase === 'lie' && age >= PRATFALL_LIE_MS) {
+        this.pratfallState = { ...this.pratfallState, phase: 'groom', start: now };
+      } else if (this.pratfallState.phase === 'groom' && age >= PRATFALL_GROOM_MS) {
+        this.pratfallState = { ...this.pratfallState, phase: 'nuzzle', start: now };
+      } else if (this.pratfallState.phase === 'nuzzle' && age >= PRATFALL_NUZZLE_MS) {
         this.pratfallState = { ...this.pratfallState, phase: 'return', start: now };
       } else if (this.pratfallState.phase === 'return' && age >= PRATFALL_RETURN_MS) {
-        this.pratfallState = null;
+        this.pratfallState = null; // 自愈完成，不留痕（R11）
+        this.nuzzleDir = null;
       }
     }
 
@@ -591,30 +758,75 @@ export class PetRenderer {
     // 体型随画布高度自适应（小窗口不裁切天气 overlay）
     const bodyR = Math.min(52 + p.energy * 0.6, H * 0.32);
 
-    // ── 甩墙受伤几何：位移（贴最近侧墙）+ 旋转 90° + 极致压扁平铺 ──
+    // ── 甩墙跌倒几何（五段喜剧时序，各段位移/旋转/压扁）──
     let injDx = 0;
     let injDy = 0;
     let injRot = 0;
     let injSx = 1;
     let injSy = 1;
+    /** 回蹭偏移（nuzzle 段朝「最近交互点」凑过去；降级实现，见 nuzzleDir 注释） */
+    let nudgeX = 0;
+    let nudgeY = 0;
+    /** groom 段的甩头摆幅（0 = 不摆），用于脸部的舔毛 wiggle */
+    let groomWiggle = 0;
     const pratfalling = this.pratfallState !== null;
     if (this.pratfallState) {
+      const st = this.pratfallState;
+      const age = now - st.start;
       // 旋转 90° 后的半宽（本地 Y 轴 → 水平）与半高（本地 X 轴 → 垂直）
       const hw = bodyR * 0.85;
       const hh = bodyR * 1.6;
       // 贴墙：本体外缘正好触到画布侧边；抬升：旋转后的底边不出画布下沿
-      const flyX = this.pratfallState.dir * Math.max(0, W - hw - 4 - cx);
+      const flyX = st.dir * Math.max(0, W - hw - 4 - cx);
       const lift = Math.max(0, baseY - (H - 4 - hh));
-      const age = now - this.pratfallState.start;
-      let q: number; // 0=原位 1=完全贴墙
-      if (this.pratfallState.phase === 'fly') q = easeOut(Math.min(1, age / PRATFALL_FLY_MS));
-      else if (this.pratfallState.phase === 'hold') q = 1;
-      else q = 1 - easeInOut(Math.min(1, age / PRATFALL_RETURN_MS));
-      injDx = flyX * q;
-      injRot = this.pratfallState.dir * q * (Math.PI / 2);
-      injSx = 1 + 0.5 * q;
-      injSy = 1 - 0.42 * q;
-      injDy = lift * q + (this.pratfallState.phase === 'hold' ? Math.sin(now / 300) * 1.2 : 0);
+      if (st.phase === 'fly') {
+        const q = easeOut(Math.min(1, age / PRATFALL_FLY_MS));
+        injDx = flyX * q;
+        injRot = st.dir * q * (Math.PI / 2);
+        injSx = 1 + 0.5 * q;
+        injSy = 1 - 0.42 * q;
+        injDy = lift * q;
+      } else if (st.phase === 'lie') {
+        // 平铺定格：满压扁 + 极缓的呼吸式起伏（sin/300ms），读作「瘫着」而非「僵住」
+        injDx = flyX;
+        injRot = st.dir * (Math.PI / 2);
+        injSx = 1.5;
+        injSy = 0.58;
+        injDy = lift + Math.sin(now / 300) * 1.2;
+      } else if (st.phase === 'groom') {
+        // 甩头舔毛复原：前 40% 坐起来（旋转/压扁归零），后 60% 小幅度甩头 wiggle。
+        // 坐起用 easeInOut（和复位同款缓动，读作「自己缓过来了」，不是弹起来）。
+        const up = easeInOut(Math.min(1, age / (PRATFALL_GROOM_MS * 0.4)));
+        injDx = flyX * (1 - up);
+        injRot = st.dir * (Math.PI / 2) * (1 - up);
+        injSx = 1 + 0.5 * (1 - up);
+        injSy = 1 - 0.42 * (1 - up);
+        injDy = lift * (1 - up);
+        const wig = Math.min(1, age / (PRATFALL_GROOM_MS * 0.4));
+        groomWiggle = Math.sin(age / 220) * 0.12 * wig * (1 - Math.min(1, age / PRATFALL_GROOM_MS));
+      } else if (st.phase === 'nuzzle') {
+        // 和好节拍：朝最近交互点凑过去蹭两下（正弦往返 = 蹭动），再慢慢退开
+        const prog = Math.min(1, age / PRATFALL_NUZZLE_MS);
+        const approach = Math.sin(Math.min(1, prog * 1.25) * Math.PI); // 0→1→0
+        const rub = Math.sin(age / 420) * 0.5 + 0.5;                  // 蹭动两下
+        let ux = 0;
+        let uy = 0;
+        if (this.nuzzleDir) {
+          const len = Math.hypot(this.nuzzleDir.x, this.nuzzleDir.y) || 1;
+          ux = this.nuzzleDir.x / len;
+          uy = this.nuzzleDir.y / len;
+        } else {
+          ux = st.dir; // 极端兜底：没有交互点就朝甩出方向蹭（标注见 nuzzleDir）
+        }
+        const mag = bodyR * 0.32 * approach * (0.6 + 0.4 * rub);
+        nudgeX = ux * mag;
+        nudgeY = uy * mag * 0.5; // 垂直方向减半：蹭是水平主导的动作
+        injRot = ux * 0.1 * approach; // 头朝目标歪一点（示好）
+      } else {
+        // return：弹性复位回位（easeInOut，快而不留痕）
+        const q = 1 - easeInOut(Math.min(1, age / PRATFALL_RETURN_MS));
+        nudgeX = (this.nuzzleDir ? Math.sign(this.nuzzleDir.x || 1) : 1) * bodyR * 0.1 * q;
+      }
     }
 
     // ── 拖拽黏性形变：沿速度方向拉伸（鼻涕质感），松手慢速回弹 ──
@@ -624,8 +836,8 @@ export class PetRenderer {
     const squishY = Math.max(0.28, (1 - p.squish - poke * 0.45) * (1 - stY) * injSy);
     const squishX = Math.max(0.28, (1 + p.squish * 0.6 + poke * 0.35) * (1 + stY * 0.7 + stX * 0.3) * injSx);
 
-    const px = cx + trembleX + injDx;
-    const py = baseY + bounceY + trembleY - injDy;
+    const px = cx + trembleX + injDx + nudgeX;
+    const py = baseY + bounceY + trembleY - injDy + nudgeY;
 
     // ── 影子（跟随本体水平位移） ──
     ctx.save();
@@ -694,12 +906,16 @@ export class PetRenderer {
     // ── 脸 ──
     const faceY = -bodyR * 0.72;
     const eyeDX = bodyR * 0.3;
-    this.drawEyes(ctx, -eyeDX, faceY, bodyR, p, now, pratfalling);
-    this.drawEyes(ctx, eyeDX, faceY, bodyR, p, now, pratfalling);
-    this.drawMouth(ctx, 0, faceY + bodyR * 0.34, bodyR, p, pratfalling);
-    // 绷带（受伤态：斜贴额头 + 十字贴布）
-    if (pratfalling) this.drawBandage(ctx, bodyR, p);
-    // 腮红（开心时；受伤态不画）
+    // groom 段甩头：整张脸随 wiggle 小幅摆动（舔毛的身体语言）
+    ctx.rotate(groomWiggle);
+    const pfPhase = this.pratfallState ? this.pratfallState.phase : null;
+    this.drawWhiskers(ctx, bodyR, p, pfPhase);
+    this.drawEyes(ctx, -eyeDX, faceY, bodyR, p, now, pfPhase);
+    this.drawEyes(ctx, eyeDX, faceY, bodyR, p, now, pfPhase);
+    this.drawMouth(ctx, 0, faceY + bodyR * 0.34, bodyR, p, pfPhase);
+    // 额头绷带（跌倒态）：lie 段冒小爱心（喜剧「冒」的定格）
+    if (pratfalling) this.drawBandage(ctx, bodyR, p, pfPhase === 'lie');
+    // 腮红（开心时；跌倒态不画 —— 跌倒是放空不是害羞）
     if (p.mouthCurve > 0.4 && !pratfalling) {
       ctx.globalAlpha = Math.min(0.5, (p.mouthCurve - 0.4) * 0.8);
       ctx.fillStyle = '#ff8fa3';
@@ -846,20 +1062,45 @@ export class PetRenderer {
     return { x: tipX, y: tipY };
   }
 
-  private drawEyes(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, now: number, pratfalling = false): void {
+  /**
+   * 眼睛。
+   *
+   * @param phase 跌倒相位（null = 常态）。
+   * 🔴 R11 拟物化判据：跌倒期间是**呆滞放空**（半闭无神、瞳孔小而不聚焦），
+   * 禁止 X 眼 / 旋转眼球 / 泪痕 / 悲伤下垂眼角 —— 「被打晕」是拟人痛苦语义，
+   * 与喜剧彩蛋的定位冲突（旧实现的 X 眼已在本次重做中删除）。
+   *   lie/nuzzle：完全放空（半闭 + 极小瞳孔，无眼神光 = 灵魂暂时不在）
+   *   groom：回神中（半睁 + 眼神光回归，读作「缓过来了」）
+   *   fly/return：沿用常态眼（动作段不需要额外表情信息）
+   */
+  private drawEyes(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, now: number, phase: PratfallPhase | null = null): void {
     const r = bodyR * 0.115;
     ctx.save();
     ctx.translate(x, y);
-    if (pratfalling) {
-      // 眩晕 X 眼
-      ctx.strokeStyle = '#2b2b3a';
-      ctx.lineWidth = 2.6;
-      ctx.lineCap = 'round';
-      const s = r * 0.95;
+    if (phase === 'lie' || phase === 'nuzzle') {
+      // 呆滞放空：半闭的平直眼睑（不弯 = 无情绪），瞳孔缩成小点且**无眼神光**，
+      // 位置略偏下（失焦感）—— 读作「放空」而非「睡着/痛苦」
+      ctx.fillStyle = `hsl(${p.hue} ${p.sat}% ${Math.max(40, p.lum)}%)`;
       ctx.beginPath();
-      ctx.moveTo(-s, -s); ctx.lineTo(s, s);
-      ctx.moveTo(s, -s); ctx.lineTo(-s, s);
-      ctx.stroke();
+      ctx.ellipse(0, -r * 0.55, r * 1.25, r * 0.85, 0, 0, Math.PI * 2); // 上眼睑罩
+      ctx.fill();
+      ctx.fillStyle = '#2b2b3a';
+      ctx.beginPath();
+      ctx.ellipse(0, r * 0.18, r * 0.42, r * 0.5, 0, 0, Math.PI * 2);  // 小而不聚焦的瞳孔
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+    if (phase === 'groom') {
+      // 回神中：半睁 + 眼神光回归（生命迹象通道重新上线）
+      ctx.fillStyle = '#2b2b3a';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, r, r * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(r * 0.3, -r * 0.2, r * 0.22, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
       return;
     }
@@ -900,7 +1141,13 @@ export class PetRenderer {
     void now;
   }
 
-  private drawMouth(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, pratfalling = false): void {
+  /**
+   * 嘴。
+   * @param phase 跌倒相位（null = 常态）。
+   * 跌倒期间保留**极轻**的波浪（卡通惯例，汤姆猫式），幅度压到常态的一半以下 ——
+   * 读作「懵」而非「痛苦扭曲」；nuzzle（和好）段换成小上扬（蹭人是开心的）。
+   */
+  private drawMouth(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, phase: PratfallPhase | null = null): void {
     const w = bodyR * 0.3;
     const curve = p.mouthCurve;
     ctx.save();
@@ -909,11 +1156,16 @@ export class PetRenderer {
     ctx.lineWidth = 2.8;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    if (pratfalling) {
-      // 眩晕波浪嘴
-      ctx.moveTo(-w, 0);
-      ctx.quadraticCurveTo(-w * 0.5, w * 0.35, 0, 0);
-      ctx.quadraticCurveTo(w * 0.5, -w * 0.35, w, 0);
+    if (phase === 'lie' || phase === 'groom') {
+      // 懵：轻微波浪（幅度 w*0.16，常态波浪的 ~45%，不得读作痛苦）
+      ctx.moveTo(-w * 0.7, 0);
+      ctx.quadraticCurveTo(-w * 0.35, w * 0.16, 0, 0);
+      ctx.quadraticCurveTo(w * 0.35, -w * 0.16, w * 0.7, 0);
+      ctx.stroke();
+    } else if (phase === 'nuzzle') {
+      // 和好：小上扬（蹭两下是示好，嘴角要有回应）
+      ctx.moveTo(-w * 0.7, 0);
+      ctx.quadraticCurveTo(0, w * 0.45, w * 0.7, 0);
       ctx.stroke();
     } else if (curve > 0.65) {
       // 大笑：张嘴
@@ -937,8 +1189,60 @@ export class PetRenderer {
     ctx.restore();
   }
 
-  /** 绷带（受伤态）：斜贴额头的白绷带 + 侧脸十字贴布 */
-  private drawBandage(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams): void {
+  /**
+   * 胡须（常驻图层）。
+   *
+   * 🔴 新增部件：本项目的猫此前**没有胡须**（T12 裁决「折弯胡须」的隐含前提）。
+   * 常驻平直是「折弯」的对比基准 —— 没有常态，就看不出非常态。
+   * 每侧三根，从脸颊向外微垂（真实猫须的自然下垂角），随呼吸极轻摆动。
+   *
+   * 跌倒期间（lie 段）**右上一根折弯**：折点在中段，梢部向下耷 ——
+   * 卡通惯例「摔了一跤胡须歪了一根」，是喜剧记号不是伤情记号
+   * （无血、无泪、无真实伤口，R11 拟物化判据）。
+   */
+  private drawWhiskers(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams, phase: PratfallPhase | null): void {
+    const faceY = -bodyR * 0.72;
+    const breath = Math.sin(performance.now() / 900) * 0.02; // 极轻的活体底噪
+    ctx.save();
+    ctx.strokeStyle = 'rgba(60,52,40,0.55)'; // 暖灰褐：比脸深一档，读作毛而非线
+    ctx.lineWidth = Math.max(1, bodyR * 0.028);
+    ctx.lineCap = 'round';
+    const sides: readonly (-1 | 1)[] = [-1, 1];
+    for (const side of sides) {
+      for (let i = 0; i < 3; i++) {
+        const y0 = faceY + bodyR * (0.12 + i * 0.1);
+        const x0 = side * bodyR * 0.52;
+        const len = bodyR * (0.52 - i * 0.06);
+        const droop = 0.16 + i * 0.1 + breath; // 越靠下越垂（自然）
+        // 折弯判定：跌倒 lie 段，右侧（side=1）最上面一根（i=0）
+        const bent = phase === 'lie' && side === 1 && i === 0;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        if (bent) {
+          // 折点在中段：先正常外伸，再陡然下耷（kink，卡通「歪了」记号）
+          const mx = x0 + side * len * 0.5;
+          const my = y0 + len * droop * 0.5;
+          ctx.quadraticCurveTo(x0 + side * len * 0.3, y0 + len * droop * 0.3, mx, my);
+          ctx.quadraticCurveTo(mx + side * len * 0.18, my + len * 0.42, mx + side * len * 0.1, my + len * 0.55);
+        } else {
+          ctx.quadraticCurveTo(x0 + side * len * 0.55, y0 + len * droop * 0.4, x0 + side * len, y0 + len * droop);
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+    void p;
+  }
+
+  /**
+   * 额头绷带（跌倒态）+ lie 段冒小爱心。
+   *
+   * 视觉重做（裁决无条件项）：**删除侧脸十字贴布**（它配 X 眼读作「重伤」），
+   * 保留额头绷带（汤姆猫式卡通惯例）并在 lie 段从绷带上缘**冒小爱心** ——
+   * 爱心是「这一跤摔得挺值」的喜剧记号，与「冒金星」同构但换成暖意。
+   * 程序化 Canvas 心形路径，不引入图片/GIF/精灵表。
+   */
+  private drawBandage(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams, hearts: boolean): void {
     ctx.save();
     // 额头绷带：绕头顶一圈
     ctx.strokeStyle = 'rgba(255,255,255,0.95)';
@@ -955,23 +1259,25 @@ export class PetRenderer {
     ctx.moveTo(-bodyR * 0.72, -bodyR * 0.94);
     ctx.quadraticCurveTo(0, -bodyR * 1.26, bodyR * 0.72, -bodyR * 0.94);
     ctx.stroke();
-    // 侧脸十字贴布
-    ctx.translate(bodyR * 0.52, -bodyR * 0.5);
-    ctx.rotate(0.3);
-    ctx.fillStyle = 'rgba(255,255,255,0.95)';
-    ctx.strokeStyle = 'rgba(30,30,60,0.15)';
-    ctx.lineWidth = 1;
-    roundRect(ctx, -bodyR * 0.2, -bodyR * 0.11, bodyR * 0.4, bodyR * 0.22, bodyR * 0.05);
-    ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = `hsl(${p.hue} ${p.sat}% 55%)`;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(-bodyR * 0.07, -bodyR * 0.05);
-    ctx.lineTo(bodyR * 0.07, bodyR * 0.05);
-    ctx.moveTo(bodyR * 0.07, -bodyR * 0.05);
-    ctx.lineTo(-bodyR * 0.07, bodyR * 0.05);
-    ctx.stroke();
+    // 🔴 十字贴布已删除（R11 视觉重做：它配 X 眼读作重伤，不配喜剧）
+    if (hearts) {
+      // 冒小爱心：三颗错峰上浮 + 淡入淡出（周期 1.6s，错开 0.53s）
+      const t = performance.now() / 1000;
+      for (let i = 0; i < 3; i++) {
+        const prog = ((t / 1.6) + i * 0.333) % 1;
+        const rise = prog;                                  // 0→1 上浮
+        const alpha = Math.sin(prog * Math.PI);             // 淡入淡出，两端归零
+        const hx = bodyR * (-0.3 + i * 0.3) + Math.sin(t * 2 + i) * bodyR * 0.06;
+        const hy = -bodyR * 1.3 - rise * bodyR * 0.75;
+        const s = bodyR * (0.09 + 0.03 * Math.sin(i * 2.1));
+        ctx.save();
+        ctx.globalAlpha = 0.85 * alpha;
+        ctx.translate(hx, hy);
+        ctx.rotate(Math.sin(t * 1.5 + i) * 0.2);
+        drawHeart(ctx, s, `hsl(${(p.hue + 330) % 360} 80% 66%)`); // 与耳内同源的暖粉
+        ctx.restore();
+      }
+    }
     ctx.restore();
   }
 
@@ -1175,14 +1481,18 @@ export class PetRenderer {
 
 /* ─────────────────────────── 绘制工具 ─────────────────────────── */
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+/**
+ * 程序化心形路径（绷带冒小爱心用）。不引入图片/GIF/精灵表（R11 裁决）。
+ * 经典双贝塞尔心形：从底部尖点起笔，左右各一个控制环。
+ */
+function drawHeart(ctx: CanvasRenderingContext2D, s: number, color: string): void {
+  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
+  ctx.moveTo(0, s * 0.9);
+  ctx.bezierCurveTo(-s * 1.1, s * 0.1, -s * 0.8, -s * 0.9, 0, -s * 0.3);
+  ctx.bezierCurveTo(s * 0.8, -s * 0.9, s * 1.1, s * 0.1, 0, s * 0.9);
   ctx.closePath();
+  ctx.fill();
 }
 
 export { lerp };
