@@ -40,18 +40,21 @@ export interface BaseTier {
 export const WARM_HUE_MIN = 30;
 export const WARM_HUE_MAX = 46;
 
-/** 从高到低排列；查表时取第一个 energy >= min 的档（量程 0–10，每档 1 分） */
+/** 从高到低排列；查表时取第一个 energy >= min 的档（量程 0–10，每档 1 分）
+ *  sat/lum 列按参考图（用户提供的金渐层实物照，本地 golden-ref/，不入库）校色：
+ *  顶档从「柠檬黄」拉向「奶油金」（sat 96→72、lum 80→86），burnt 同步提亮，
+ *  保持 sat/lum 双降结构与所有结构性断言（差值≥40/≥20、单调、跨度）不变。 */
 export const BASE_TIERS: readonly BaseTier[] = [
-  { emotion: 'blissful',  min: 9.5, label: '狂喜', headline: '整个人都在发光！',       breath: 1.6, bounce: 7, blink: 5.5, hue: 46, sat: 96, lum: 80 },
-  { emotion: 'radiant',   min: 8.5, label: '神采奕奕', headline: '状态拉满，随时开干',   breath: 2.0, bounce: 6, blink: 5.0, hue: 44, sat: 94, lum: 78 },
-  { emotion: 'cheerful',  min: 7.5, label: '愉快', headline: '心情不错，节奏刚好',       breath: 2.4, bounce: 5, blink: 4.6, hue: 42, sat: 92, lum: 76 },
-  { emotion: 'content',   min: 6.5, label: '满足', headline: '稳稳的，很舒服',           breath: 2.8, bounce: 4, blink: 4.2, hue: 40, sat: 88, lum: 74 },
-  { emotion: 'calm',      min: 5.5, label: '平和', headline: '平静在线，不急不躁',       breath: 3.2, bounce: 3, blink: 4.0, hue: 38, sat: 78, lum: 72 },
-  { emotion: 'steady',    min: 4.5, label: '平稳', headline: '正常续航中',               breath: 3.6, bounce: 2.5, blink: 3.8, hue: 37, sat: 66, lum: 70 },
-  { emotion: 'weary',     min: 3.5, label: '有点累', headline: '电量开始报警了',         breath: 4.2, bounce: 2, blink: 3.4, hue: 36, sat: 54, lum: 67 },
-  { emotion: 'drained',   min: 2.5, label: '透支', headline: '需要喘口气…',              breath: 4.8, bounce: 1.5, blink: 3.0, hue: 35, sat: 42, lum: 63 },
-  { emotion: 'exhausted', min: 1.5, label: '疲惫', headline: '快撑不住了，请救救我',     breath: 5.6, bounce: 1, blink: 2.6, hue: 34, sat: 32, lum: 58 },
-  { emotion: 'burnt',     min: -1,  label: '枯竭', headline: '已关机边缘…',              breath: 6.5, bounce: 0.5, blink: 2.2, hue: 33, sat: 24, lum: 52 },
+  { emotion: 'blissful',  min: 9.5, label: '狂喜', headline: '整个人都在发光！', breath: 1.6, bounce: 7, blink: 5.5, hue: 46, sat: 72, lum: 86 },
+  { emotion: 'radiant',   min: 8.5, label: '神采奕奕', headline: '状态拉满，随时开干', breath: 2.0, bounce: 6, blink: 5.0, hue: 44, sat: 70, lum: 84 },
+  { emotion: 'cheerful',  min: 7.5, label: '愉快', headline: '心情不错，节奏刚好', breath: 2.4, bounce: 5, blink: 4.6, hue: 42, sat: 68, lum: 82 },
+  { emotion: 'content',   min: 6.5, label: '满足', headline: '稳稳的，很舒服', breath: 2.8, bounce: 4, blink: 4.2, hue: 40, sat: 65, lum: 80 },
+  { emotion: 'calm',      min: 5.5, label: '平和', headline: '平静在线，不急不躁', breath: 3.2, bounce: 3, blink: 4.0, hue: 38, sat: 60, lum: 78 },
+  { emotion: 'steady',    min: 4.5, label: '平稳', headline: '正常续航中', breath: 3.6, bounce: 2.5, blink: 3.8, hue: 37, sat: 54, lum: 76 },
+  { emotion: 'weary',     min: 3.5, label: '有点累', headline: '电量开始报警了', breath: 4.2, bounce: 2, blink: 3.4, hue: 36, sat: 47, lum: 73 },
+  { emotion: 'drained',   min: 2.5, label: '透支', headline: '需要喘口气…', breath: 4.8, bounce: 1.5, blink: 3.0, hue: 35, sat: 40, lum: 69 },
+  { emotion: 'exhausted', min: 1.5, label: '疲惫', headline: '快撑不住了，请救救我', breath: 5.6, bounce: 1, blink: 2.6, hue: 34, sat: 32, lum: 64 },
+  { emotion: 'burnt',     min: -1,  label: '枯竭', headline: '已关机边缘…', breath: 6.5, bounce: 0.5, blink: 2.2, hue: 33, sat: 26, lum: 58 },
 ] as const;
 
 export function tierFor(energy: number): BaseTier {

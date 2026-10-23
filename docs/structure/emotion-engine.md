@@ -24,8 +24,8 @@ export interface BaseTier {
   bounce: number;      // 弹跳幅度 px
   blink: number;       // 眨眼间隔 s
   hue: number;         // 主色调（全程 33–46 暖区间，R7）
-  sat: number;         // 饱和度（96 → 24，疲惫主要靠它表达）
-  lum: number;         // 🆕 v1.2 明度基线（80 → 52）。R7 用：低精力降饱和+降明度，
+  sat: number;         // 饱和度（72 → 26，疲惫主要靠它表达；E3 参考图校色后）
+  lum: number;         // 🆕 v1.2 明度基线（86 → 58；E3 校色后）。R7 用：低精力降饱和+降明度，
                        //    色相不退暖。pet.ts 的 bodyGrad / 眼皮遮罩参数化读它
                        //    （原硬编码 lightness 78/64/48 已废除）
 }

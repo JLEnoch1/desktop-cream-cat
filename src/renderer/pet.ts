@@ -1506,7 +1506,7 @@ export class PetRenderer {
   }
 
   /**
-   * 金渐层胸腹/口吻奶白区（参考图校色，golden-ref/reference-golden-cat.jpg）。
+   * 金渐层胸腹/口吻奶白区（参考图校色：用户提供的金渐层实物照，本地 golden-ref/ 不入库）。
    * 真实金渐层：胸腹与口吻是一片接近白的奶油色，与背脊的金色/tipping 形成对比；
    * 初版通体单色金读作「柠檬黄团子」，缺这片奶白就没有品种感。
    * 透明度随 sat/lum 派生（精力降 → 奶白变脏变灰，与「褪成浅金灰」同管线，无独立常量）；
@@ -1516,11 +1516,19 @@ export class PetRenderer {
     const whiten = clamp((p.lum - 52) / (86 - 52), 0, 1); // burnt→blissful 派生，同 coatPatternParams 思路
     if (whiten <= 0.02) return;
     ctx.save();
-    ctx.globalAlpha = 0.30 + 0.40 * whiten;
-    ctx.fillStyle = `hsl(${p.hue} ${Math.max(16, p.sat * 0.3)}% ${Math.min(97, p.lum + 13)}%)`;
-    // 胸腹围兜：下缘与身体底缘同弧（不越出轮廓）
+    // 🔴 必须裁剪进身体轮廓（E2 鞍状带的同款教训）：胸腹白片下缘否则越出底缘，读作雪球
     ctx.beginPath();
-    ctx.ellipse(0, bodyR * 0.06, bodyR * 0.52, bodyR * 0.46, 0, 0, Math.PI * 2);
+    ctx.moveTo(-bodyR, 0);
+    ctx.bezierCurveTo(-bodyR * 1.05, -bodyR * 0.9, -bodyR * 0.62, -bodyR * 1.42, 0, -bodyR * 1.42);
+    ctx.bezierCurveTo(bodyR * 0.62, -bodyR * 1.42, bodyR * 1.05, -bodyR * 0.9, bodyR, 0);
+    ctx.bezierCurveTo(bodyR * 0.6, bodyR * 0.12, -bodyR * 0.6, bodyR * 0.12, -bodyR, 0);
+    ctx.closePath();
+    ctx.clip();
+    ctx.globalAlpha = 0.25 + 0.40 * whiten;
+    ctx.fillStyle = `hsl(${p.hue} ${Math.max(16, p.sat * 0.3)}% ${Math.min(97, p.lum + 13)}%)`;
+    // 胸腹围兜：裁剪后自然贴合底缘
+    ctx.beginPath();
+    ctx.ellipse(0, bodyR * 0.1, bodyR * 0.52, bodyR * 0.46, 0, 0, Math.PI * 2);
     ctx.fill();
     // 口吻白：嘴周小片，鼻头落在其上
     ctx.beginPath();
