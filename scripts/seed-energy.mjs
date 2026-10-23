@@ -25,6 +25,6 @@ const target = Number(energy);
 const INITIAL = 7; // src/ledger/fold.ts INITIAL_ENERGY
 db.prepare('INSERT INTO events (type, at, source, predicted_delta, actual_delta, energy_after, payload) VALUES (?,?,?,?,?,?,?)')
   .run('energy.set', Date.now(), 'user', null, target - INITIAL, target,
-    JSON.stringify({ kind: 'energy.set', before: INITIAL, target, reason: 'seed for screenshot' }));
+    JSON.stringify({ kind: 'energy.set', before: INITIAL, target, reason: '晨间基线' }));
 db.close();
 console.log(`seeded energy=${target} → ${join(dir, 'energy-pet.db')}`);

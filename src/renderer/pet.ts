@@ -1227,6 +1227,10 @@ export class PetRenderer {
       ctx.beginPath();
       ctx.ellipse(0, 0, r, r * Math.max(0.15, open), 0, 0, Math.PI * 2);
       ctx.fill();
+      // 黑眼线环（金渐层品种签名特征：绿眼 + 黑眼线，参考图形象对齐）
+      ctx.strokeStyle = '#241d14';
+      ctx.lineWidth = Math.max(1.2, r * 0.16);
+      ctx.stroke();
       // 竖瞳（猫眼特征）：细长深色椭圆，随睁眼度缩放
       ctx.fillStyle = '#1a1a24';
       ctx.beginPath();
@@ -1320,25 +1324,36 @@ export class PetRenderer {
     if (contrast <= 0) return;
     ctx.save();
     ctx.globalAlpha = opacity;
-    const tipDark = `hsla(${p.hue} ${Math.max(18, p.sat * 0.45)}% ${Math.max(20, p.lum * 0.35)}% / ${contrast})`;
-    // 背脊线：沿头顶到背部顶缘的一条暗色渐变带（黑毛尖沿脊柱分布，尖尖向下渐隐）
-    const ridge = ctx.createLinearGradient(0, -bodyR * 1.5, 0, -bodyR * 0.55);
-    ridge.addColorStop(0, tipDark);
+    // 鞍状带只取半强度：tipping 是「毛尖一层暗」，不是半只猫染深——
+    // 初版满强度截图读作兜帽/暹罗重点色，与金渐层「通体金、背脊一线暗」不符。
+    const saddle = `hsla(${p.hue} ${Math.max(18, p.sat * 0.45)}% ${Math.max(20, p.lum * 0.35)}% / ${contrast * 0.5})`;
+    const tipDark = `hsla(${p.hue} ${Math.max(18, p.sat * 0.45)}% ${Math.max(20, p.lum * 0.35)}% / ${contrast * 0.8})`;
+    // 🔴 花纹必须裁剪进身体轮廓内：初版脊线带画到了头顶轮廓之外，
+    // 截图里读作一顶棕色贝雷帽——金渐层的 tipping 是「毛色沿背脊渐暗」，
+    // 不是贴在头上的一块深色帽片。
+    ctx.beginPath();
+    ctx.moveTo(-bodyR, 0);
+    ctx.bezierCurveTo(-bodyR * 1.05, -bodyR * 0.9, -bodyR * 0.62, -bodyR * 1.42, 0, -bodyR * 1.42);
+    ctx.bezierCurveTo(bodyR * 0.62, -bodyR * 1.42, bodyR * 1.05, -bodyR * 0.9, bodyR, 0);
+    ctx.bezierCurveTo(bodyR * 0.6, bodyR * 0.12, -bodyR * 0.6, bodyR * 0.12, -bodyR, 0);
+    ctx.closePath();
+    ctx.clip();
+    // 背脊鞍状带：只压头顶轮廓下一浅层（-1.42R → -0.9R），不漫过整个上半身
+    const ridge = ctx.createLinearGradient(0, -bodyR * 1.42, 0, -bodyR * 0.9);
+    ridge.addColorStop(0, saddle);
     ridge.addColorStop(1, 'hsla(0 0% 0% / 0)');
     ctx.fillStyle = ridge;
-    ctx.beginPath();
-    ctx.moveTo(-bodyR * 0.9, -bodyR * 1.12);
-    ctx.bezierCurveTo(-bodyR * 0.35, -bodyR * 1.52, bodyR * 0.35, -bodyR * 1.52, bodyR * 0.9, -bodyR * 1.12);
-    ctx.bezierCurveTo(bodyR * 0.5, -bodyR * 1.12, -bodyR * 0.5, -bodyR * 1.12, -bodyR * 0.9, -bodyR * 1.12);
-    ctx.closePath();
-    ctx.fill();
-    // 耳背黑毛尖：左右耳尖各一小撮暗色（真实金渐层耳背有黑毛尖）
+    ctx.fillRect(-bodyR * 1.1, -bodyR * 1.5, bodyR * 2.2, bodyR * 0.65);
+    ctx.restore();
+    // 耳背黑毛尖：左右耳尖各一小撮暗色（真实金渐层耳背有黑毛尖，位于身体轮廓外故不裁剪）
+    ctx.save();
+    ctx.globalAlpha = opacity * 0.8;
     ctx.fillStyle = tipDark;
     for (const s of [-1, 1] as const) {
       ctx.beginPath();
-      ctx.moveTo(s * bodyR * 0.26, -bodyR * 1.34);
-      ctx.quadraticCurveTo(s * bodyR * 0.5, -bodyR * 1.72, s * bodyR * 0.74, -bodyR * 1.5);
-      ctx.quadraticCurveTo(s * bodyR * 0.54, -bodyR * 1.4, s * bodyR * 0.26, -bodyR * 1.34);
+      ctx.moveTo(s * bodyR * 0.3, -bodyR * 1.3);
+      ctx.quadraticCurveTo(s * bodyR * 0.5, -bodyR * 1.66, s * bodyR * 0.72, -bodyR * 1.46);
+      ctx.quadraticCurveTo(s * bodyR * 0.52, -bodyR * 1.38, s * bodyR * 0.3, -bodyR * 1.3);
       ctx.closePath();
       ctx.fill();
     }
