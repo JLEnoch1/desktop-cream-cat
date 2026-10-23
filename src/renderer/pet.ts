@@ -174,6 +174,46 @@ export function resolveProneVariant(energy: number): {
   };
 }
 
+/* ─────────────── 金渐层「黑毛尖」花纹（T13 ①）——由 sat/lum 派生 ───────────────
+ *
+ * 裁决：「黑毛尖渐变做成独立花纹图层，patternOpacity/patternContrast 由 sat/lum
+ * 同一参数驱动——精力降，花纹对比度单调收敛，低档时猫整体褪成均匀的浅金灰
+ * （毛色失去光泽恰是真实病弱猫的第一视觉信号）。🔴 禁止花纹走独立常量。」
+ *
+ * 分布（真实金渐层）：耳背、背脊线、尾尖；🔴 面部与腹部素净（脸是第一信息通道，
+ * 腹部是 dragStretch 形变最大区，花纹拉伸会出伪影）。
+ */
+/**
+ * 花纹强度参数（导出纯函数，供单测）。
+ * 极值直接取 BASE_TIERS 首末档实测值（96/24、80/52），不另造常量——
+ * 精力降 → sat/lum 单调降 → contrast/opacity 同步收敛。
+ */
+export function coatPatternParams(sat: number, lum: number): { opacity: number; contrast: number } {
+  const satMax = BASE_TIERS[0].sat;                    // 96（blissful）
+  const satMin = BASE_TIERS[BASE_TIERS.length - 1].sat; // 24（burnt）
+  const lumMax = BASE_TIERS[0].lum;                    // 80
+  const lumMin = BASE_TIERS[BASE_TIERS.length - 1].lum; // 52
+  const contrast = clamp((sat - satMin) / (satMax - satMin), 0, 1);
+  // 保留微弱底纹，不随低档走到 0（避免「花纹消失」的跳变，与「褪成浅金灰」语义一致）
+  const opacity = clamp(0.35 + ((lum - lumMin) / (lumMax - lumMin)) * 0.65, 0.35, 1);
+  return { opacity, contrast };
+}
+
+/* ─────────────── 绿眼睛（T13 ③）——虹膜色相随精力迁移 ───────────────
+ * 裁决：8-10 暖翠绿 → 4-7 琥珀翠 → 0-3 蜜琥珀，🔴 绿分量 ≤30%；
+ * 眼睛永不全灰（眼神光=生命迹象，瞳孔高光随精力缩放）；0-1 档保留最小微光+安详半闭。
+ * 虹膜色相不受 R7 约束（R7 只管身体主色），但绿分量是裁决自设约束。
+ */
+/**
+ * 虹膜色调（导出纯函数，供单测）。返回 hue（55 蜜琥珀 → 150 暖翠绿）与 green 权重（恒 ≤0.3）。
+ */
+export function irisTone(energy: number): { hue: number; sat: number; green: number } {
+  const g = clamp(energy / 8, 0, 1);       // 0 at energy≤0，1 at energy≥8
+  const green = 0.05 + g * 0.25;           // 0.05（蜜琥珀，几乎无绿）→ 0.30（暖翠绿上限）
+  const hue = 55 + g * 95;                 // 55（蜜琥珀）→ 150（暖翠绿）
+  return { hue, sat: 62, green };
+}
+
 /**
  * 渲染参数构建（导出的模块级**纯函数**，供 node 环境单测；不依赖 canvas/DOM）。
  *
@@ -942,6 +982,9 @@ export class PetRenderer {
     ctx.closePath();
     ctx.fill();
 
+    // ── 金渐层黑毛尖花纹（T13 ①）：耳背 + 背脊线，身体渐变之后、脸之前 ──
+    this.drawCoatPattern(ctx, bodyR, p);
+
     // 高光
     ctx.globalAlpha = 0.35;
     ctx.fillStyle = '#ffffff';
@@ -1106,6 +1149,17 @@ export class PetRenderer {
     ctx.beginPath();
     ctx.arc(tipX, tipY, wAt(1), 0, Math.PI * 2);
     ctx.fill();
+    // 尾尖黑毛尖（金渐层 T13 ①：尾尖暗色渐变，随 sat/lum 收敛）
+    const tipPat = coatPatternParams(p.sat, p.lum);
+    if (tipPat.contrast > 0) {
+      ctx.save();
+      ctx.globalAlpha = tipPat.opacity * tipPat.contrast;
+      ctx.fillStyle = `hsl(${p.hue} ${Math.max(18, p.sat * 0.4)}% ${Math.max(24, p.lum * 0.4)}%)`;
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, bodyR * 0.13, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     return { x: tipX, y: tipY };
   }
 
@@ -1166,15 +1220,22 @@ export class PetRenderer {
       else ctx.arc(0, -r * 0.6, r * 1.1, Math.PI * 0.15, Math.PI * 0.85);
       ctx.stroke();
     } else {
-      // 睁眼
-      ctx.fillStyle = '#2b2b3a';
+      // 睁眼：虹膜色相随精力迁移（T13 ③：暖翠绿→琥珀翠→蜜琥珀，绿分量 ≤30%）
+      const iris = irisTone(p.energy);
+      const irisLight = Math.min(72, Math.max(42, p.lum + 10));
+      ctx.fillStyle = `hsl(${iris.hue} ${iris.sat}% ${irisLight}%)`;
       ctx.beginPath();
       ctx.ellipse(0, 0, r, r * Math.max(0.15, open), 0, 0, Math.PI * 2);
       ctx.fill();
-      // 眼神光
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      // 竖瞳（猫眼特征）：细长深色椭圆，随睁眼度缩放
+      ctx.fillStyle = '#1a1a24';
       ctx.beginPath();
-      ctx.arc(r * 0.35, -r * 0.35 * open, r * 0.3 * open, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, r * 0.22, r * Math.max(0.16, open * 0.5), 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 眼神光（生命迹象通道：瞳孔高光随精力/睁眼度缩放，永不全灰）
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.beginPath();
+      ctx.arc(r * 0.35, -r * 0.3 * open, r * 0.28 * open, 0, Math.PI * 2);
       ctx.fill();
       // 疲惫：眼皮下垂（上半遮罩）
       if (p.eyeOpen < 0.7) {
@@ -1247,6 +1308,43 @@ export class PetRenderer {
    * 卡通惯例「摔了一跤胡须歪了一根」，是喜剧记号不是伤情记号
    * （无血、无泪、无真实伤口，R11 拟物化判据）。
    */
+  /**
+   * 金渐层「黑毛尖」花纹图层（T13 ①，裁决）：
+   *   分布：耳背 + 背脊线（尾尖的暗色在 drawTail 内做，因尾在独立 transform 下）。
+   *   面/腹素净（脸是第一信息通道，腹部是 dragStretch 形变最大区）。
+   *   patternOpacity/patternContrast 由 coatPatternParams(sat, lum) 派生，🔴 无独立常量。
+   *   低精力时花纹随 sat/lum 收敛，猫整体褪成浅金灰（毛色失去光泽 = 病弱第一信号）。
+   */
+  private drawCoatPattern(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams): void {
+    const { opacity, contrast } = coatPatternParams(p.sat, p.lum);
+    if (contrast <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    const tipDark = `hsla(${p.hue} ${Math.max(18, p.sat * 0.45)}% ${Math.max(20, p.lum * 0.35)}% / ${contrast})`;
+    // 背脊线：沿头顶到背部顶缘的一条暗色渐变带（黑毛尖沿脊柱分布，尖尖向下渐隐）
+    const ridge = ctx.createLinearGradient(0, -bodyR * 1.5, 0, -bodyR * 0.55);
+    ridge.addColorStop(0, tipDark);
+    ridge.addColorStop(1, 'hsla(0 0% 0% / 0)');
+    ctx.fillStyle = ridge;
+    ctx.beginPath();
+    ctx.moveTo(-bodyR * 0.9, -bodyR * 1.12);
+    ctx.bezierCurveTo(-bodyR * 0.35, -bodyR * 1.52, bodyR * 0.35, -bodyR * 1.52, bodyR * 0.9, -bodyR * 1.12);
+    ctx.bezierCurveTo(bodyR * 0.5, -bodyR * 1.12, -bodyR * 0.5, -bodyR * 1.12, -bodyR * 0.9, -bodyR * 1.12);
+    ctx.closePath();
+    ctx.fill();
+    // 耳背黑毛尖：左右耳尖各一小撮暗色（真实金渐层耳背有黑毛尖）
+    ctx.fillStyle = tipDark;
+    for (const s of [-1, 1] as const) {
+      ctx.beginPath();
+      ctx.moveTo(s * bodyR * 0.26, -bodyR * 1.34);
+      ctx.quadraticCurveTo(s * bodyR * 0.5, -bodyR * 1.72, s * bodyR * 0.74, -bodyR * 1.5);
+      ctx.quadraticCurveTo(s * bodyR * 0.54, -bodyR * 1.4, s * bodyR * 0.26, -bodyR * 1.34);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   private drawWhiskers(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams, phase: PratfallPhase | null): void {
     const faceY = -bodyR * 0.72;
     const breath = Math.sin(performance.now() / 900) * 0.02; // 极轻的活体底噪
