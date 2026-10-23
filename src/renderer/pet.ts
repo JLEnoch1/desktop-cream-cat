@@ -214,6 +214,29 @@ export function irisTone(energy: number): { hue: number; sat: number; green: num
   return { hue, sat: 62, green };
 }
 
+/* ─────────────── 次级运动（F：生命感来源，确定性、无随机） ───────────────
+ * 不变式 #13 要求姿态解算无随机——次级运动全部是**时间的确定性函数**：
+ * 同参数同像素，测试可断言。生命感来自「鞭状延迟」与「微颤」，不来自噪声。
+ */
+/**
+ * 尾尖相位延迟跟随：摆相位沿脊柱逐段滞后（s=0 根 → 1 梢），幅度向梢递增——
+ * 尾巴是「鞭子」不是「刚体」，这是真实猫尾甩动的最低成本近似。纯函数导出供单测。
+ */
+export function tailLagAngle(t: number, speed: number, amp: number, s: number): number {
+  return Math.sin(t * speed - s * 1.6) * amp * 0.12 * s;
+}
+
+/** 耳微颤：低频小幅活体底噪（±0.015rad），左右耳相位错开避免镜像感。纯函数导出供单测。 */
+export function earTwitch(t: number, side: number): number {
+  return Math.sin(t * 0.9 + (side > 0 ? 1.3 : 0)) * 0.015;
+}
+
+/** 确定性哈希（T10 变体池同款思路）：索引 → [0,1)。禁用 Math.random（不变式 #13）。 */
+function furHash(i: number): number {
+  const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 /**
  * 渲染参数构建（导出的模块级**纯函数**，供 node 环境单测；不依赖 canvas/DOM）。
  *
@@ -960,7 +983,7 @@ export class PetRenderer {
     // 明度跟随 lum 通道（R7）：高精力透亮、低精力发灰发暗，色相始终暖金
     const L = p.lum;
     const bodyGrad = ctx.createRadialGradient(px - bodyR * 0.35, py - bodyR * 1.2, bodyR * 0.2, px, py - bodyR * 0.5, bodyR * 1.6);
-    bodyGrad.addColorStop(0, `hsl(${p.hue} ${p.sat}% ${Math.min(92, L + 14)}%)`);
+    bodyGrad.addColorStop(0, `hsl(${p.hue} ${p.sat}% ${Math.min(94, L + 12)}%)`);
     bodyGrad.addColorStop(0.55, `hsl(${p.hue} ${p.sat}% ${L}%)`);
     bodyGrad.addColorStop(1, `hsl(${p.hue} ${Math.max(20, p.sat - 12)}% ${Math.max(34, L - 16)}%)`);
     ctx.save();
@@ -970,8 +993,8 @@ export class PetRenderer {
     // 耳朵（M1 情绪通道）：画在头顶之后——基部被头部轮廓遮住，只露三角尖；
     // 飞机耳/耷拉/前倾的姿态差异在三角剪影上才读得出来（天线读不出）
     const earPose = resolveEarPose(p);
-    this.drawEar(ctx, -bodyR * 0.46, -bodyR * 1.26, -1, earPose, breathPhase, p, bodyR);
-    this.drawEar(ctx, bodyR * 0.46, -bodyR * 1.26, 1, earPose, breathPhase, p, bodyR);
+    this.drawEar(ctx, -bodyR * 0.46, -bodyR * 1.26, -1, earPose + earTwitch(t, -1), breathPhase, p, bodyR);
+    this.drawEar(ctx, bodyR * 0.46, -bodyR * 1.26, 1, earPose + earTwitch(t, 1), breathPhase, p, bodyR);
     ctx.fillStyle = bodyGrad;
     ctx.beginPath();
     // 圆润的团子形：底部平，顶部圆
@@ -984,6 +1007,10 @@ export class PetRenderer {
 
     // ── 金渐层黑毛尖花纹（T13 ①）：耳背 + 背脊线，身体渐变之后、脸之前 ──
     this.drawCoatPattern(ctx, bodyR, p);
+    // ── F 真实感：三灯位补光 + 毛边 + 噪点质感（裁剪进身体轮廓） ──
+    this.drawFurAndLight(ctx, bodyR, p);
+    // ── 金渐层胸腹/口吻奶白区（参考图校色）：最上层，脸部信息之前 ──
+    this.drawChestPatch(ctx, bodyR, p);
 
     // 高光
     ctx.globalAlpha = 0.35;
@@ -1002,6 +1029,7 @@ export class PetRenderer {
     this.drawWhiskers(ctx, bodyR, p, pfPhase);
     this.drawEyes(ctx, -eyeDX, faceY, bodyR, p, now, pfPhase);
     this.drawEyes(ctx, eyeDX, faceY, bodyR, p, now, pfPhase);
+    this.drawNose(ctx, 0, faceY + bodyR * 0.16, bodyR, p);
     this.drawMouth(ctx, 0, faceY + bodyR * 0.34, bodyR, p, pfPhase);
     // 额头绷带（跌倒态）：lie 段冒小爱心（喜剧「冒」的定格）
     if (pratfalling) this.drawBandage(ctx, bodyR, p, pfPhase === 'lie');
@@ -1110,7 +1138,7 @@ export class PetRenderer {
     let y = y0;
     for (let i = 1; i <= N; i++) {
       const s = i / N;
-      const a = rootA + (tipA - rootA) * (s * s);
+      const a = rootA + (tipA - rootA) * (s * s) + tailLagAngle(t, pose.speed, pose.amp, s);
       x += Math.cos(a) * (L / N);
       y += Math.sin(a) * (L / N);
       if (pose.lift < 0) y = Math.min(y, floorY + s * bodyR * 0.06); // 垂尾贴地钳制
@@ -1222,7 +1250,7 @@ export class PetRenderer {
     } else {
       // 睁眼：虹膜色相随精力迁移（T13 ③：暖翠绿→琥珀翠→蜜琥珀，绿分量 ≤30%）
       const iris = irisTone(p.energy);
-      const irisLight = Math.min(72, Math.max(42, p.lum + 10));
+      const irisLight = Math.min(78, Math.max(46, p.lum + 10));
       ctx.fillStyle = `hsl(${iris.hue} ${iris.sat}% ${irisLight}%)`;
       ctx.beginPath();
       ctx.ellipse(0, 0, r, r * Math.max(0.15, open), 0, 0, Math.PI * 2);
@@ -1240,6 +1268,11 @@ export class PetRenderer {
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
       ctx.beginPath();
       ctx.arc(r * 0.35, -r * 0.3 * open, r * 0.28 * open, 0, Math.PI * 2);
+      ctx.fill();
+      // 辅光点（第二高光，弱）：双高光让眼球读作球体而非贴纸（F 真实感）
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath();
+      ctx.arc(-r * 0.28, r * 0.22 * open, r * 0.14 * open, 0, Math.PI * 2);
       ctx.fill();
       // 疲惫：眼皮下垂（上半遮罩）
       if (p.eyeOpen < 0.7) {
@@ -1259,6 +1292,27 @@ export class PetRenderer {
    * 跌倒期间保留**极轻**的波浪（卡通惯例，汤姆猫式），幅度压到常态的一半以下 ——
    * 读作「懵」而非「痛苦扭曲」；nuzzle（和好）段换成小上扬（蹭人是开心的）。
    */
+  /**
+   * 鼻头（参考图校色）：真实金渐层是**砖红/粉褐鼻**，不是黑鼻。
+   * 色相随精力轻微迁移（高精力偏砖红、低精力偏灰褐），明度随 lum —— 仍走 R7 管线，无独立状态。
+   */
+  private drawNose(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams): void {
+    ctx.save();
+    ctx.translate(x, y);
+    const noseHue = 12 + p.energy * 0.8;              // 12（砖红）→ 20（粉褐）
+    const noseLum = Math.max(38, Math.min(62, p.lum * 0.62));
+    ctx.fillStyle = `hsl(${noseHue} ${Math.max(28, p.sat * 0.5)}% ${noseLum}%)`;
+    ctx.beginPath();
+    // 倒三角圆角鼻：上宽下尖
+    ctx.moveTo(-bodyR * 0.07, -bodyR * 0.03);
+    ctx.quadraticCurveTo(0, -bodyR * 0.055, bodyR * 0.07, -bodyR * 0.03);
+    ctx.quadraticCurveTo(bodyR * 0.055, bodyR * 0.035, 0, bodyR * 0.06);
+    ctx.quadraticCurveTo(-bodyR * 0.055, bodyR * 0.035, -bodyR * 0.07, -bodyR * 0.03);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   private drawMouth(ctx: CanvasRenderingContext2D, x: number, y: number, bodyR: number, p: RenderParams, phase: PratfallPhase | null = null): void {
     const w = bodyR * 0.3;
     const curve = p.mouthCurve;
@@ -1357,6 +1411,121 @@ export class PetRenderer {
       ctx.closePath();
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  /**
+   * F · 真实感润色（路线 D）：三灯位补光 + 毛边 + 噪点质感。
+   * 主光 = bodyGrad 既有顶部 radial；此处补：
+   *   辅光 = 腹部暖色软光（环境反射，低角度）；
+   *   轮廓光 = 顶部轮廓亮细边（把剪影从背景里分离出来，是「不像平涂」的关键）；
+   *   毛边 = 沿轮廓的确定性哈希短笔画（绒毛感，消除塑料渐变）；
+   *   噪点 = 64px 确定性噪声瓦片低 alpha overlay（一次生成）。
+   * 🔴 全部裁剪进身体轮廓；强度由 sat/lum 派生，无独立魔法常量；同参数同像素。
+   */
+  private drawFurAndLight(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams): void {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(-bodyR, 0);
+    ctx.bezierCurveTo(-bodyR * 1.05, -bodyR * 0.9, -bodyR * 0.62, -bodyR * 1.42, 0, -bodyR * 1.42);
+    ctx.bezierCurveTo(bodyR * 0.62, -bodyR * 1.42, bodyR * 1.05, -bodyR * 0.9, bodyR, 0);
+    ctx.bezierCurveTo(bodyR * 0.6, bodyR * 0.12, -bodyR * 0.6, bodyR * 0.12, -bodyR, 0);
+    ctx.closePath();
+    ctx.clip();
+    // 辅光：腹部暖反射（同色相提亮，低 alpha，不碰 R7 的 hue 区间）
+    const fill = ctx.createRadialGradient(0, -bodyR * 0.15, bodyR * 0.1, 0, -bodyR * 0.15, bodyR * 0.95);
+    fill.addColorStop(0, `hsla(${p.hue} ${p.sat}% ${Math.min(94, p.lum + 12)}% / 0.3)`);
+    fill.addColorStop(1, 'hsla(0 0% 0% / 0)');
+    ctx.fillStyle = fill;
+    ctx.fillRect(-bodyR * 1.1, -bodyR * 1.5, bodyR * 2.2, bodyR * 1.7);
+    // 轮廓光：顶部亮细边，宽度由 lum 派生（越健康越透亮）
+    ctx.strokeStyle = `hsla(${p.hue} ${Math.max(30, p.sat - 20)}% ${Math.min(96, p.lum + 24)}% / 0.55)`;
+    ctx.lineWidth = 1.2 + p.lum * 0.03;
+    ctx.beginPath();
+    ctx.moveTo(-bodyR * 0.98, -bodyR * 0.12);
+    ctx.bezierCurveTo(-bodyR * 1.02, -bodyR * 0.9, -bodyR * 0.62, -bodyR * 1.4, 0, -bodyR * 1.4);
+    ctx.bezierCurveTo(bodyR * 0.62, -bodyR * 1.4, bodyR * 1.02, -bodyR * 0.9, bodyR * 0.98, -bodyR * 0.12);
+    ctx.stroke();
+    // 毛边：44 笔沿顶部轮廓的短 stroke（furHash 确定性抖动位置/长度/倾角）
+    ctx.strokeStyle = `hsla(${p.hue} ${Math.max(20, p.sat - 8)}% ${Math.max(30, p.lum - 10)}% / 0.35)`;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 44; i++) {
+      const u = i / 43;
+      const ang = Math.PI + u * Math.PI;          // 上半弧（canvas y 向下）
+      const h = furHash(i);
+      const x = Math.cos(ang) * bodyR * 1.0;
+      const y = -bodyR * 0.66 + Math.sin(ang) * bodyR * 0.74;
+      const len = bodyR * (0.05 + h * 0.05);
+      const tilt = (h - 0.5) * 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(
+        x + Math.cos(ang) * len * 0.5, y + Math.sin(ang) * len * 0.5,
+        x + Math.cos(ang) * len, y + Math.sin(ang) * len + tilt,
+      );
+      ctx.stroke();
+    }
+    // 噪点质感：低 alpha overlay，消塑料感
+    const grain = this.grainTile();
+    ctx.globalAlpha = 0.05;
+    ctx.globalCompositeOperation = 'overlay';
+    for (let gx = -bodyR * 1.1; gx < bodyR * 1.1; gx += 64) {
+      for (let gy = -bodyR * 1.5; gy < bodyR * 0.2; gy += 64) {
+        ctx.drawImage(grain, gx, gy);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** 确定性噪点瓦片（懒生成；LCG seed=42，每次会话同像素序——不变式 #13） */
+  private grain: HTMLCanvasElement | null = null;
+  private grainTile(): HTMLCanvasElement {
+    if (this.grain) return this.grain;
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const g = c.getContext('2d');
+    if (g) {
+      const img = g.createImageData(64, 64);
+      let seed = 42;
+      const rnd = (): number => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = 190 + Math.floor(rnd() * 66);
+        img.data[i] = v;
+        img.data[i + 1] = v;
+        img.data[i + 2] = v;
+        img.data[i + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+    }
+    this.grain = c;
+    return c;
+  }
+
+  /**
+   * 金渐层胸腹/口吻奶白区（参考图校色，golden-ref/reference-golden-cat.jpg）。
+   * 真实金渐层：胸腹与口吻是一片接近白的奶油色，与背脊的金色/tipping 形成对比；
+   * 初版通体单色金读作「柠檬黄团子」，缺这片奶白就没有品种感。
+   * 透明度随 sat/lum 派生（精力降 → 奶白变脏变灰，与「褪成浅金灰」同管线，无独立常量）；
+   * 只盖下腹与口吻，🔴 眼睛/腮红区不盖（脸是第一信息通道，眼周保持金底+黑眼线）。
+   */
+  private drawChestPatch(ctx: CanvasRenderingContext2D, bodyR: number, p: RenderParams): void {
+    const whiten = clamp((p.lum - 52) / (86 - 52), 0, 1); // burnt→blissful 派生，同 coatPatternParams 思路
+    if (whiten <= 0.02) return;
+    ctx.save();
+    ctx.globalAlpha = 0.30 + 0.40 * whiten;
+    ctx.fillStyle = `hsl(${p.hue} ${Math.max(16, p.sat * 0.3)}% ${Math.min(97, p.lum + 13)}%)`;
+    // 胸腹围兜：下缘与身体底缘同弧（不越出轮廓）
+    ctx.beginPath();
+    ctx.ellipse(0, bodyR * 0.06, bodyR * 0.52, bodyR * 0.46, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 口吻白：嘴周小片，鼻头落在其上
+    ctx.beginPath();
+    ctx.ellipse(0, -bodyR * 0.48, bodyR * 0.26, bodyR * 0.18, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 
