@@ -1,20 +1,98 @@
 {
-  "name": "energy-pet",
-  "version": "1.0.0",
-  "description": "桌面精力宠物 — 事件溯源驱动的 Electron 桌面伴侣",
-  "main": "dist/main/index.js",
+  "name": "creamcat",
+  "productName": "CreamCat",
+  "version": "2.0.0",
   "private": true,
+  "author": "CreamCat",
+  "description": "奶油猫 · 桌面精力宠物 — 事件溯源精力管理 × 天气情绪 × 可换皮肤桌面猫",
+  "main": "dist/main/index.js",
   "scripts": {
     "build": "node scripts/build.mjs",
     "build:tests": "node scripts/build-tests.mjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run build:tests && node --test dist-tests/*.mjs",
     "start": "npm run build && electron .",
-    "dev": "npm run build && electron . --dev"
+    "dev": "npm run build && electron . --dev",
+    "icon": "swift scripts/make-icon.swift build",
+    "helper": "bash scripts/build-helper.sh",
+    "prebuild:mac": "npm run build && npm run helper",
+    "build:mac": "electron-builder --mac --universal",
+    "build:win": "npm run build && electron-builder --win --x64",
+    "release": "bash scripts/release.sh",
+    "site:sync": "node scripts/sync-downloads.mjs",
+    "site:dev": "node scripts/serve-site.mjs"
   },
   "devDependencies": {
     "electron": "^44.9.1",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.creamcat.pet",
+    "productName": "CreamCat",
+    "asar": false,
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "skins/**/*",
+      "!skins/**/.cache/**",
+      "!**/*.map",
+      "package.json"
+    ],
+    "mac": {
+      "extraResources": [
+        {
+          "from": "native/keytap",
+          "to": "native/keytap"
+        },
+        {
+          "from": "native/winlist",
+          "to": "native/winlist"
+        }
+      ],
+      "category": "public.app-category.entertainment",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        }
+      ],
+      "artifactName": "CreamCat-macOS-${version}-universal.${ext}",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "title": "CreamCat ${version}",
+      "window": { "width": 540, "height": 380 },
+      "contents": [
+        { "x": 148, "y": 190, "type": "file" },
+        { "x": 392, "y": 190, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "extraResources": [],
+      "artifactName": "CreamCat-Windows-${version}-x64.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "CreamCat",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }
