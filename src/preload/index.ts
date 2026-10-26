@@ -1,19 +1,34 @@
 /**
  * Preload —— 渲染进程安全桥接（contextIsolation: true, nodeIntegration: false）。
  *
- * 只暴露白名单方法，渲染进程无法直接触达 Node/Electron 能力。
- * 所有写操作都经 IPC → Coordinator → DecisionLog（事件流唯一入口）。
+ * v2.0 融合版：双窗口共用一份 preload，暴露两个命名空间——
+ *  - `window.pet`：领域 API（uiWin 卡片流用；与 v1.x 完全兼容 + uiHint/onUiCmd）
+ *  - `window.cat`：奶油猫壳层 API（catWin 行走窗口用：布局/皮肤/敲键/命令/心情/反应）
+ *
+ * 所有领域写操作都经 IPC → Coordinator → DecisionLog（事件流唯一入口）。
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppState, PendingSlide, WindowMode, RecoveryItem, RecoveryVersion, WeeklyReport, WeatherState, AdjustWindow, TaskDurationRequest } from '../core/types.js';
+import type {
+  AppState, PendingSlide, WindowMode, RecoveryItem, RecoveryVersion, WeeklyReport,
+  WeatherState, AdjustWindow, TaskDurationRequest, CatLayout, CatCmd, CatMoodPayload,
+  CatReactPayload, UiCmd,
+} from '../core/types.js';
 import type { DomainEvent } from '../core/events.js';
 import type { EmotionState } from '../core/types.js';
 
 /** 状态推送订阅句柄 */
 type Unsub = () => void;
 
-const api = {
+function subscribe<T>(channel: string, cb: (payload: T) => void): Unsub {
+  const listener = (_e: unknown, payload: T): void => cb(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
+/* ─────────────────────────── 领域 API（window.pet） ─────────────────────────── */
+
+const petApi = {
   /* ─────────── 状态 ─────────── */
   getState: (): Promise<AppState | null> => ipcRenderer.invoke('app:getState'),
 
@@ -22,24 +37,24 @@ const api = {
   reportError: (info: { source: string; message: string; stack?: string }): void => {
     ipcRenderer.send('renderer:error', info);
   },
-  onState: (cb: (state: AppState) => void): Unsub => {
-    const listener = (_e: unknown, state: AppState): void => cb(state);
-    ipcRenderer.on('state:update', listener);
-    return () => ipcRenderer.removeListener('state:update', listener);
+  onState: (cb: (state: AppState) => void): Unsub => subscribe('state:update', cb),
+
+  /* ─────────── UI 窗口显隐协同 ─────────── */
+  /**
+   * 上报渲染层本地 UI 状态（恢复扇形/周报查看等主进程看不见的活动 UI）。
+   * 主进程合并「领域状态需要 UI」与本 hint 决定 uiWin 显隐。
+   */
+  uiHint: (active: boolean): void => {
+    ipcRenderer.send('ui:hint', active);
   },
+  /** 主进程命令：打开面板 / 打开恢复菜单 / 查看周报 */
+  onUiCmd: (cb: (cmd: UiCmd) => void): Unsub => subscribe('ui:cmd', cb),
 
   /* ─────────── 命中区上报 / click-through ─────────── */
   /** 上报可交互元素包围盒（窗口内 DIP 坐标）；主进程轮询判断是否命中 */
   hitRects: (rects: { x: number; y: number; w: number; h: number }[]): void => {
     ipcRenderer.send('win:hotRects', rects);
   },
-
-  /* ─────────── 拖拽 ─────────── */
-  /** body = 宠物本体在窗口内的矩形（来自 petBounds），供主进程按「本体留在工作区」钳制 */
-  dragStart: (x: number, y: number, body?: { x: number; y: number; w: number; h: number }): void =>
-    ipcRenderer.send('win:dragStart', { x, y, body }),
-  dragMove: (x: number, y: number): void => ipcRenderer.send('win:dragMove', { x, y }),
-  dragEnd: (): void => ipcRenderer.send('win:dragEnd'),
 
   /* ─────────── 窗口模式 ─────────── */
   setMode: (mode: WindowMode): Promise<WindowMode> => ipcRenderer.invoke('win:setMode', mode),
@@ -80,8 +95,6 @@ const api = {
   adjustCancel: (): Promise<boolean> => ipcRenderer.invoke('adjust:cancel'),
 
   /* ─────────── 恢复 ─────────── */
-  /** @deprecated 已迁至 recoveryStartAdjust（事件后调节窗口）；保留仅为兼容旧调用，主进程恒返回 null */
-  recoveryTake: (itemId: string): Promise<PendingSlide | null> => ipcRenderer.invoke('recovery:take', itemId),
   recoveryUpdateDelta: (itemId: string, delta: number, reason: string): Promise<RecoveryItem | null> =>
     ipcRenderer.invoke('recovery:updateDelta', { itemId, delta, reason }),
   recoveryVersions: (itemId: string): Promise<RecoveryVersion[]> => ipcRenderer.invoke('recovery:versions', itemId),
@@ -106,6 +119,49 @@ const api = {
   reposition: (): Promise<boolean> => ipcRenderer.invoke('app:reposition'),
 };
 
-export type PetApi = typeof api;
+/* ─────────────────────────── 奶油猫壳层 API（window.cat） ─────────────────────────── */
 
-contextBridge.exposeInMainWorld('pet', api);
+const catApi = {
+  /** 渲染层就绪：主进程随即推布局/敲键状态/ledge 并启动 helper */
+  ready: (): void => {
+    ipcRenderer.send('cat:ready');
+  },
+  getLayout: (): Promise<CatLayout> => ipcRenderer.invoke('cat:getLayout'),
+  /** 行走/拖拽/抛物线：渲染层拥有窗口位置，逐帧同步给主进程 */
+  moveWindow: (x: number, y: number): void => {
+    ipcRenderer.send('cat:moveWindow', x, y);
+  },
+  getSkin: (): Promise<unknown> => ipcRenderer.invoke('cat:getSkin'),
+  /** 右键弹菜单（菜单内容由主进程动态构建） */
+  showMenu: (): void => {
+    ipcRenderer.send('cat:showMenu');
+  },
+  openAccessibility: (): void => {
+    ipcRenderer.send('cat:openAccessibility');
+  },
+  /** 拖拽期间保持窗口可交互（光标可能瞬间离开猫体热区） */
+  setDragActive: (active: boolean): void => {
+    ipcRenderer.send('cat:dragActive', active);
+  },
+  /** 猫体命中区（窗口内 DIP 坐标）：主进程 50ms 轮询光标做 click-through */
+  hotRect: (rect: { x: number; y: number; w: number; h: number }): void => {
+    ipcRenderer.send('cat:hotRect', rect);
+  },
+  /** 全局敲键（Bongo Cat）：{code, down} */
+  onKey: (cb: (d: { code: number; down: boolean }) => void): Unsub => subscribe('cat:key', cb),
+  /** 壳层命令：布局/敲键权限/暂停/睡觉/皮肤热更/ledge/回地面 */
+  onCmd: (cb: (cmd: CatCmd) => void): Unsub => subscribe('cat:cmd', cb),
+  /** 领域心情推送：精力/情绪/天气（驱动活力、表情偏向、overlay、pulse 光晕） */
+  onMood: (cb: (mood: CatMoodPayload) => void): Unsub => subscribe('cat:mood', cb),
+  /** 领域事件反应：{reaction, text?} → 表情插播 + 气泡 */
+  onReact: (cb: (r: CatReactPayload) => void): Unsub => subscribe('cat:react', cb),
+  reportError: (info: { source: string; message: string; stack?: string }): void => {
+    ipcRenderer.send('renderer:error', info);
+  },
+};
+
+export type PetApi = typeof petApi;
+export type CatApi = typeof catApi;
+
+contextBridge.exposeInMainWorld('pet', petApi);
+contextBridge.exposeInMainWorld('cat', catApi);

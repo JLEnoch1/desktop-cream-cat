@@ -301,3 +301,68 @@ export interface PendingSlide {
   baseEnergy: number;
   createdAt: number;
 }
+
+/* ─────────────────────────── 奶油猫壳层（v2.0 融合） ─────────────────────────── */
+
+/**
+ * 猫窗口布局（主进程 → 渲染层）。
+ * 猫窗口随 FSM 行走：渲染层拥有窗口位置 px/py（屏幕坐标），
+ * 布局只给工作区范围与窗口尺寸。
+ */
+export interface CatLayout {
+  /** 主屏工作区 */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 猫窗口尺寸 */
+  winW: number;
+  winH: number;
+  /** 猫站地面时的窗口 y（工作区底边 - winH） */
+  groundY: number;
+}
+
+/** ledge（窗口顶边）：id 对渲染层不透明（数字窗口 id 或 'screen-top'） */
+export interface CatLedge {
+  id: number | string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  pid: number;
+}
+
+/** 主进程 → 猫窗口的命令（cat:cmd 通道） */
+export type CatCmd =
+  | { type: 'layout'; layout: CatLayout }
+  | { type: 'keystatus'; ok: boolean }
+  | { type: 'pause' }
+  | { type: 'resume' }
+  | { type: 'sleep-now' }
+  | { type: 'skins-updated' }
+  | { type: 'ledges'; ledges: CatLedge[] }
+  | { type: 'ledge-gone'; id: number | string }
+  /** 猫回地面（托盘/右键菜单「回到地面」；顶边趴着时 UI 卡片也需要） */
+  | { type: 'go-ground' }
+  /** UI 卡片窗口出现/收起：hold=true 时猫停止自主散步（安静陪伴），收起后恢复 */
+  | { type: 'ui-hold'; active: boolean };
+
+/** 猫心情推送（cat:mood 通道）——领域 AppState 的猫侧投影 */
+export interface CatMoodPayload {
+  energy: number;
+  emotion: EmotionState;
+  weather: WeatherState;
+}
+
+/** 领域事件 → 猫的反应（cat:react 通道）；reaction 见 mood.ts 映射表 */
+export interface CatReactPayload {
+  reaction: string;
+  /** 可选气泡文案（缺省由渲染层按 reaction+心情抽取） */
+  text?: string;
+}
+
+/** 主进程 → UI 窗口的命令（ui:cmd 通道） */
+export type UiCmd =
+  | { type: 'openPanel' }
+  | { type: 'openRecovery' }
+  | { type: 'showWeekly' };
