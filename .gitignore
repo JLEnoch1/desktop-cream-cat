@@ -21,3 +21,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# 皮肤管线缓存（可再生，运行时生成）
+skins/**/.cache/
+release/
