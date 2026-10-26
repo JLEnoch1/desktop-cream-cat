@@ -5,12 +5,21 @@
     <link rel="stylesheet" href="cat.css" />
   </head>
   <body>
-    <!-- 精力值胶囊：绑定在桌宠下方，鼠标悬浮时显示（DOM 在 canvas 之前 → 猫脚压在胶囊前，像站在牌子上） -->
-    <div id="energy-pill" aria-hidden="true">
-      <span class="ep-bolt">⚡</span><span id="ep-num">7.0</span><span class="ep-sep">·</span><span id="ep-tier">平稳</span>
-    </div>
     <canvas id="stage"></canvas>
     <div id="bubble"></div>
+    <!-- 精力值 HUD：从 uiWin 原样迁移到桌宠下方（底部预留条带），悬浮显示。
+         DOM 在 canvas 之后 → 绘制在上层，滑条可交互；猫脚底线(374)在条带之上，互不遮挡。 -->
+    <div id="energy-hud">
+      <span class="weather" id="hud-weather" role="button" title="刷新天气">🌤️</span>
+      <span class="num" id="hud-num">7.0</span>
+      <span class="bar" id="hud-bar-track">
+        <span class="cells" id="hud-cells" aria-hidden="true"></span>
+        <input type="range" id="hud-slider" min="0" max="10" step="0.5" value="7"
+               aria-label="精力调节" />
+      </span>
+      <span class="tier" id="hud-tier">平稳</span>
+      <span class="adjust-badge" id="hud-adjust-badge" hidden>调节中 <b id="hud-adjust-count">7</b>s</span>
+    </div>
     <script src="cat.js"></script>
   </body>
 </html>

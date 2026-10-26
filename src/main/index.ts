@@ -54,9 +54,9 @@ function logCrash(tag: string, detail: unknown): void {
 
 /* ─────────────────────────── 常量 ─────────────────────────── */
 
-/** 猫窗口尺寸（与 renderer/cat 的 W/H 常量一致；底部含 38px 精力值胶囊条） */
+/** 猫窗口尺寸（与 renderer/cat 的 W/H 常量一致；底部含 50px 精力值 HUD 条带） */
 const CAT_W = 360;
-const CAT_H = 412;
+const CAT_H = 424;
 /** UI 窗口尺寸：卡片区 + 底部 HUD */
 const UI_W = 400;
 const UI_H = 620;
@@ -203,11 +203,18 @@ function sendToCat(channel: string, payload: unknown): void {
   catWin.webContents.send(channel, payload);
 }
 
-/** 统一的状态刷新入口（节流由 bus 的 debounce 负责） */
+/** 统一的状态刷新入口（节流由 bus 的 debounce 负责）。
+ *  两个窗口共享同一份状态推送：uiWin 驱动卡片流，catWin 驱动脚下的精力 HUD
+ *  （原有 #energy-hud 从 uiWin 迁移到桌宠下方）。Coordinator 内部 JSON 去重。 */
 function flushState(): void {
-  coordinator?.pushState(sendToUi);
+  coordinator?.pushState((channel, payload) => {
+    sendToUi(channel, payload);
+    sendToCat(channel, payload);
+  });
   // 周报弹窗出现（null → 非 null）时提醒猫：领域事件 → 猫的反应
   const st = coordinator?.buildState();
+  // 滑动卡收起 → 通知 catWin HUD 退出预览态（拖动中 pendingSlide 存在，不会误发）
+  if (st && !st.pendingSlide) sendToCat('hud:preview', null);
   if (st?.reportModal && !lastReportSeen) {
     lastReportSeen = true;
     react('report-due');
@@ -278,14 +285,15 @@ let lastNeedUi = false;
 let hotRects: HotRect[] = [];          // uiWin 命中区
 let uiIgnoring = true;
 let catIgnoring = true;
-let catHotRect: HotRect | null = null; // 猫体命中区（渲染层上报前用默认值兜底）
+let catHotRects: HotRect[] = [];       // 猫体 + 精力 HUD 命中区（渲染层上报前用默认值兜底）
 let catDragActive = false;
 let catDragLastAt = 0;
 const DRAG_STALE_MS = 8000;
 let hitTimer: ReturnType<typeof setInterval> | null = null;
 
-/** 猫体默认命中区：窗口底部居中（CX=180，脚底线 GROUND=374，猫高约 250；
- *  底部 38px 精力值胶囊条是纯展示层，不进命中区） */
+/** 猫体默认命中区：窗口底部居中（CX=180，脚底线 GROUND=374，猫高约 250）。
+ *  底部 50px 条带是迁移来的精力 HUD：显示时由渲染层追加进命中区（滑条可交互），
+ *  隐藏时不进——默认兜底只含猫体。 */
 const CAT_DEFAULT_RECT: HotRect = { x: 92, y: 110, w: 176, h: 264 };
 
 function setUiIgnore(ignore: boolean): void {
@@ -324,8 +332,8 @@ function isCursorOverCat(): boolean {
   if (!catWin || catWin.isDestroyed()) return false;
   const b = catWin.getBounds();
   const pt = screen.getCursorScreenPoint();
-  const rect = catHotRect ?? CAT_DEFAULT_RECT;
-  return pointInRects(pt.x - b.x, pt.y - b.y, [rect], b.width, b.height);
+  const rects = catHotRects.length > 0 ? catHotRects : [CAT_DEFAULT_RECT];
+  return pointInRects(pt.x - b.x, pt.y - b.y, rects, b.width, b.height);
 }
 
 let warnedEmptyRects = false;
@@ -669,9 +677,9 @@ function registerIpc(): void {
   });
 
   // 猫体命中区（窗口内 DIP 坐标）
-  ipcMain.on('cat:hotRect', (_e, rect: HotRect) => {
-    const [r] = sanitizeRects([rect]);
-    catHotRect = r ?? null;
+  ipcMain.on('cat:hotRect', (_e, rect: HotRect | HotRect[]) => {
+    // 猫体 + 精力 HUD（显示时追加）：统一按数组净化
+    catHotRects = sanitizeRects(Array.isArray(rect) ? rect : [rect]);
     try { setCatIgnore(!isCursorOverCat()); } catch (err) { logCrash('cat hotRect update failed', err); }
   });
 
@@ -684,7 +692,12 @@ function registerIpc(): void {
     syncUiVisibility();
     return slide;
   });
-  ipcMain.handle('slide:preview', (_e, target: number) => c()?.previewSlide(Number(target) || 0) ?? null);
+  ipcMain.handle('slide:preview', (_e, target: number) => {
+    const pv = c()?.previewSlide(Number(target) || 0) ?? null;
+    // HUD 已迁移到 catWin（桌宠下方）：滑动卡拖动的预览值转发给猫窗口渲染
+    sendToCat('hud:preview', pv ? pv.energy : null);
+    return pv;
+  });
   ipcMain.handle('slide:confirm', (_e, p: { target: number; note?: string }) => {
     const ev = c()?.confirmSlide(Number(p.target) || 0, p.note) ?? null;
     flushState();
@@ -880,15 +893,16 @@ function setupSelfcheck(): void {
   catWin.webContents.once('did-finish-load', () => {
     setTimeout(async () => {
       try {
-        // 猫窗口体检：皮肤加载（false = 回退程序化猫）+ FSM 状态 + 精力胶囊
-        // （模拟一次悬浮 mousemove → 胶囊应显示；截图时保持可见以便验收）
+        // 猫窗口体检：皮肤加载（false = 回退程序化猫）+ FSM 状态 + 精力 HUD
+        // （模拟一次悬浮 mousemove → HUD 应显示；截图时保持可见以便验收）
         const catInfo = await catWin!.webContents.executeJavaScript(
           'window.dispatchEvent(new MouseEvent("mousemove", { clientX: 180, clientY: 300, bubbles: true }));'
           + 'JSON.stringify({ skin: !!(window.petDebug && window.petDebug.exprLoaded && window.petDebug.exprLoaded()),'
           + ' state: window.petDebug ? window.petDebug.state() : null,'
-          + ' pill: (document.getElementById("ep-num") || {}).textContent,'
-          + ' pillTier: (document.getElementById("ep-tier") || {}).textContent,'
-          + ' pillShown: !!(document.getElementById("energy-pill") || { classList: { contains() { return false; } } }).classList.contains("show") })',
+          + ' hudNum: (document.getElementById("hud-num") || {}).textContent,'
+          + ' hudTier: (document.getElementById("hud-tier") || {}).textContent,'
+          + ' hudCells: document.querySelectorAll("#hud-cells .cell").length,'
+          + ' hudShown: !!(document.getElementById("energy-hud") || { classList: { contains() { return false; } } }).classList.contains("show") })',
         );
         console.log(`[selfcheck] cat info=${catInfo}`);
         const image = await catWin!.webContents.capturePage();

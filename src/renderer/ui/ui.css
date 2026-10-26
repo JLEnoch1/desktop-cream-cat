@@ -205,10 +205,6 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
 .s-title { font-size: 15.5px; font-weight: 800; letter-spacing: .01em; color: var(--ink); }
 .s-sub { font-size: 12px; color: var(--ink-soft); margin-top: 3px; }
 
-.s-value-row {
-  display: flex; align-items: baseline; justify-content: center; gap: 7px;
-  margin: 16px 0 4px;
-}
 .s-value {
   font-size: 36px;
   font-weight: 800;
@@ -260,17 +256,141 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
 .s-actions { display: flex; gap: 8px; margin-top: 12px; }
 .s-actions .btn { flex: 1; padding: 10px 0; font-size: 13px; }
 
-/* 晨间基线：薄荷奶油渐层头（日出意象的奶油转译） */
-#slide-card.morning { background: linear-gradient(168deg, var(--mint-soft) 0%, var(--card) 40%); }
-#slide-card.morning .s-title::before { content: '🌅 '; }
+/* ── 皇室书信卡（晨间基线 / 临时调节共用布局；配色沿用奶油 token） ──
+   信头：居中徽记 + 问候语（rm-head 墨线排版的书信转译）→ 双细线分隔 →
+   正文：印章式精力徽记（大数字 + Δ 火漆角标）→ 参考信息框（rm-note 同款）→
+   滑轨节标题（rm-sec h3 薄荷下划线）→ 附言横线 → 落款区（猫爪火漆印 + 右对齐按钮）。 */
 
-/* 临时调节（仅预览）：纸底 + 墨线虚线边框，暗示「不落库」 */
+/* 卡面内衬细框：正式书信的证书感（伪元素穿透指针，不影响交互与命中区） */
+#slide-card::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  pointer-events: none;
+}
+
+/* 晨间基线：薄荷奶油渐层（日出意象的奶油转译） */
+#slide-card.morning { background: linear-gradient(168deg, var(--mint-soft) 0%, var(--card) 40%); }
+
+/* 临时调节（仅预览）：纸底 + 墨线虚线边框，暗示「不落库」——像一封书信草稿 */
 #slide-card.manual {
   background: linear-gradient(168deg, var(--paper) 0%, var(--card) 42%);
   border-style: dashed;
 }
-#slide-card.manual .s-title::before { content: '🎚️ '; }
-#slide-card.manual .s-actions .btn { flex: 1; }
+
+/* 信头：徽记 + 居中问候 */
+#slide-card .s-crest {
+  display: flex; justify-content: center;
+  margin: -2px 0 6px;
+}
+#slide-card .s-title {
+  text-align: center;
+  font-size: 16.5px;
+  letter-spacing: .04em;
+  color: var(--green-deep); /* rm-head h2 同款色 */
+}
+#slide-card .s-sub {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted); /* rm-sub 同款色 */
+  margin-top: 4px;
+  line-height: 1.55;
+}
+
+/* 双细线：墨线粗 + 发丝细，信头分隔（rm-head border-bottom 的正式化） */
+#slide-card .s-rule {
+  position: relative;
+  height: 4px;
+  margin: 10px 2px 0;
+  border-top: 2px solid var(--stroke);
+}
+#slide-card .s-rule::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; top: 2px;
+  border-top: 1px solid var(--stroke-faint);
+}
+
+/* 印章式精力徽记：公文印章双环（墨外环 + 留白 + 内发丝环），微倾像盖上去的 */
+#slide-card .s-seal-wrap {
+  position: relative;
+  display: flex; justify-content: center;
+  margin: 13px 0 9px;
+}
+#slide-card .s-seal {
+  width: 94px; height: 94px;
+  border-radius: 50%;
+  border: 2.5px solid var(--stroke);
+  background: radial-gradient(circle at 34% 28%, var(--card) 0%, var(--mint-soft) 80%);
+  box-shadow: inset 0 0 0 3px var(--card), inset 0 0 0 4.5px var(--stroke-soft), var(--hard);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  transform: rotate(-3deg);
+}
+#slide-card .s-seal .s-value { line-height: 1.05; }
+#slide-card .s-seal .s-unit { margin-top: 3px; }
+/* Δ 角标：像火漆吊牌斜挂在印章右下（pos/neg 配色仍由 .s-delta 修饰类驱动） */
+#slide-card .s-delta {
+  position: absolute;
+  right: calc(50% - 71px);
+  bottom: -5px;
+  transform: rotate(4deg);
+  box-shadow: 2px 2px 0 rgba(32, 36, 42, .12);
+}
+
+/* 参考信息：rm-note 同款薄荷虚线信息框 */
+#slide-card .s-predicted {
+  margin: 0 0 10px;
+  padding: 7px 12px;
+  background: var(--mint-soft);
+  border: 1.5px dashed rgba(46, 83, 65, .4);
+  border-radius: var(--r-item);
+}
+
+/* 滑轨节标题：rm-sec h3 同款（green-deep + 薄荷下划线），文案随模式切换 */
+#slide-card .s-sec-h { margin-top: 2px; }
+#slide-card .s-sec-h::before {
+  content: '今日电量';
+  display: inline-block;
+  font-size: 12.5px; font-weight: 800; letter-spacing: .06em;
+  color: var(--green-deep);
+  border-bottom: 2.5px solid var(--mint);
+  padding-bottom: 1px;
+}
+#slide-card.manual .s-sec-h::before { content: '拖动预览'; }
+
+/* 附言：信纸横线式（去掉围框，只留虚线书写线） */
+#slide-card .s-note {
+  margin-top: 8px;
+  padding: 8px 4px 6px;
+  border: none;
+  border-bottom: 2px dashed var(--stroke-soft);
+  border-radius: 0;
+  background: transparent;
+}
+#slide-card .s-note:focus {
+  border-bottom-color: var(--stroke);
+  box-shadow: none;
+}
+
+/* 落款区：左下猫爪火漆印，右下按钮（rm-actions 同款右对齐） */
+#slide-card .s-sign {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+#slide-card .s-stamp {
+  width: 42px; height: 42px;
+  flex: 0 0 auto;
+  border: 2px dashed rgba(46, 83, 65, .45);
+  border-radius: 50%;
+  background: rgba(174, 199, 166, .14);
+  display: flex; align-items: center; justify-content: center;
+  transform: rotate(-8deg);
+}
+#slide-card .s-actions { margin-top: 0; justify-content: flex-end; }
+#slide-card .s-actions .btn { flex: 0 0 auto; padding: 10px 20px; }
 
 /* ── 时长确认卡 ── */
 #duration-card .s-title::before { content: '⏱️ '; }
@@ -326,130 +446,9 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
 #adjust-card .a-delta.neg { color: var(--brick); }
 #adjust-card .s-note { margin-top: 8px; }
 
-/* ─────────────────────────── HUD 精力条（窗口底部奶油 pill） ─────────────────────────── */
-
-#energy-hud {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%) translateY(8px);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 15px;
-  background: var(--card);
-  border: 2.5px solid var(--stroke);
-  border-radius: 999px;
-  box-shadow: var(--card-shadow);
-  opacity: 0;
-  transition: opacity .25s ease, transform .25s cubic-bezier(.16,1,.3,1);
-  pointer-events: none;
-  z-index: 12;
-}
-#energy-hud.show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-  pointer-events: auto; /* 显示时才接管指针；隐藏态绝不挡桌面 */
-}
-#energy-hud .num {
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: .02em;
-}
-/* 10 格精力条：每格 1 分，当前格按小数比例填充（半格支持） */
-#energy-hud .bar {
-  position: relative;   /* 滑块覆盖层的定位上下文 */
-  display: flex;
-  gap: 3px;
-  width: 132px;
-  height: 14px;
-}
-#energy-hud .bar .cells {
-  display: flex;
-  gap: 3px;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-#energy-hud .bar .cell {
-  flex: 1;
-  position: relative;
-  border-radius: 3px;
-  background: var(--groove);
-  box-shadow: inset 0 0 0 1.5px var(--stroke-faint);
-  overflow: hidden;
-}
-#energy-hud .bar .cell i {
-  position: absolute;
-  inset: 0;
-  width: 0%;
-  background: linear-gradient(90deg, var(--mint), #7FA377);
-  transition: width .3s cubic-bezier(.16,1,.3,1);
-}
-/* 覆盖在格子上的透明滑块：平时拖动只预览、松手回弹；调节窗口内写草稿 */
-#hud-slider {
-  position: absolute;
-  left: -8px;
-  top: 50%;
-  width: calc(100% + 16px);
-  height: 24px;
-  margin: 0;
-  transform: translateY(-50%);
-  cursor: ew-resize;
-  z-index: 2;
-}
-#hud-slider::-webkit-slider-runnable-track {
-  height: 24px;
-  background: transparent;
-  box-shadow: none;
-}
-#hud-slider::-webkit-slider-thumb {
-  width: 16px; height: 16px;
-  margin-top: 4px;
-  border: 2.5px solid var(--stroke);
-  background: var(--card);
-  box-shadow: 2px 2px 0 rgba(32, 36, 42, .18);
-  opacity: .6;
-  transition: transform .15s cubic-bezier(.16,1,.3,1), border-color .2s, opacity .2s;
-}
-/* 平时预览态：虚影提示「不落库」（触碰精力条本体样式不变，无 hover 形变） */
-#energy-hud .bar.previewing .cell i { opacity: .45; }
-#energy-hud .bar.previewing #hud-slider::-webkit-slider-thumb {
-  border-style: dashed;
-  border-color: var(--muted);
-  opacity: 1;
-}
-/* 事件后调节窗口：进度条进入「可写」高亮态 */
-#energy-hud .bar.live .cell i { box-shadow: 0 0 0 1.5px rgba(46, 83, 65, .35); }
-#energy-hud .bar.live #hud-slider::-webkit-slider-thumb {
-  border-color: var(--green);
-  opacity: 1;
-}
-#energy-hud .tier { font-size: 11px; color: var(--ink-soft); font-weight: 600; }
-#energy-hud .weather {
-  font-size: 13px;
-  cursor: pointer; /* 点击 = 静默刷新天气（weatherRefresh），只更新图标 */
-  transition: transform .18s cubic-bezier(.16,1,.3,1);
-}
-#energy-hud .weather:hover { transform: scale(1.18); }
-#energy-hud .weather:active { transform: scale(.94); }
-/* 调节窗口倒计时角标 */
-#energy-hud .adjust-badge {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--card);
-  background: var(--green);
-  border: 1.5px solid var(--stroke);
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  animation: fadeUp .25s cubic-bezier(.16,1,.3,1);
-}
-#energy-hud .adjust-badge b { font-weight: 800; }
-#energy-hud .adjust-badge[hidden] { display: none; }
+/* ─────────────────────────── HUD 精力条 ───────────────────────────
+   已迁移到 catWin（src/renderer/cat/cat.css 同名块）：
+   精力值绑定在桌宠下方，悬浮显示——本窗口不再持有 HUD。 */
 
 /* ─────────────────────────── 任务面板（panel 模式） ─────────────────────────── */
 

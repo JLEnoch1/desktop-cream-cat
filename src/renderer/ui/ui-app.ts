@@ -11,7 +11,7 @@
  * （恢复扇形、周报查看态）调 uiHint(true/false) 协同保持窗口可见。
  */
 
-import { tierFor, describe as describeEmotion } from '../../emotion/engine.js';
+import { describe as describeEmotion } from '../../emotion/engine.js';
 import { ENERGY_MAX } from '../../core/types.js';
 import type {
   AppState, PendingSlide, InsightRecommendation, WeeklyReportPayload, WeeklyReport,
@@ -50,16 +50,8 @@ const $ = <T extends HTMLElement>(id: string): T => {
   return el as T;
 };
 
-const hud = $('energy-hud');
-const hudNum = $('hud-num');
-const hudCells = $('hud-cells');
-const hudTier = $('hud-tier');
-const hudWeather = $('hud-weather');
-// HUD 进度条 = 精力调节的「平时预览」入口（无窗口时拖动只预览、松手回弹）
-const hudSlider = $<HTMLInputElement>('hud-slider');
-const hudBarTrack = $('hud-bar-track');
-const hudAdjustBadge = $('hud-adjust-badge');
-const hudAdjustCount = $('hud-adjust-count');
+// HUD 精力条已整体迁移到 catWin（桌宠下方，悬浮显示）——本窗口不再持有 HUD 元素。
+// 滑动卡拖动的预览值经主进程 hud:preview 转发给猫窗口渲染。
 
 const slideCard = $('slide-card');
 const sTitle = $('s-title');
@@ -136,18 +128,10 @@ let weeklyViewOpen = false;
 let lastRecoverySig = '';
 
 /* ── 事件后调节窗口（渲染侧镜像） ── */
-/** 主进程 AdjustWindow 的本地镜像；null = 无窗口（HUD 滑块只预览） */
+/** 主进程 AdjustWindow 的本地镜像；null = 无窗口 */
 let adjustWin: AdjustWindow | null = null;
-/** 调节窗口的本地倒计时（按镜像 expiresAt 每 250ms 重算，到 0 等状态推送切 confirming） */
-let adjustCountdown: ReturnType<typeof setInterval> | null = null;
 /** 待确认时长的任务（流程第一步）；null = 时长卡未打开 */
 let durationReq: TaskDurationRequest | null = null;
-/** HUD 滑块「平时拖动」的预览态：松手回弹到滑动前的值 */
-let hudPreviewing = false;
-/** 滑动前 HUD 记录的真实精力（回弹目标） */
-let hudRestEnergy = 0;
-/** 滑动卡预览态：HUD 显示预览值，不被状态推送的真值覆盖（卡关闭即复位） */
-let slidePreviewActive = false;
 /** uiHint 去重：只有变化才发 IPC */
 let lastUiHint: boolean | null = null;
 
@@ -163,10 +147,6 @@ function fmtDelta(v: number): string {
   const r = Math.round(v * 2) / 2; // 0.5 步长
   return r > 0 ? `+${r}` : String(r);
 }
-
-const WEATHER_ICON: Record<string, string> = {
-  sunny: '☀️', cloudy: '☁️', rain: '🌧️', thunderstorm: '⛈️',
-};
 
 function fmtDate(ms: number): string {
   const d = new Date(ms);
@@ -234,11 +214,10 @@ function collectHotRects(): HotRect[] {
     if ((el.id === 'recovery-pop' || el.closest?.('#recovery-pop')) && !recoveryPop.classList.contains('show')) return true;
     // 周报弹窗：同理（17:30 弹出 / showWeekly 查看，确认后收起）
     if (el.id === 'report-modal' && !el.classList.contains('show')) return true;
-    // 时长卡 / 调节弹窗 / 精力 HUD 同样按 class 判定：
+    // 时长卡 / 调节弹窗同样按 class 判定：
     // 关闭动画期间 computed opacity 仍 > 0.05，但命中区必须立刻回收，
     // 否则「卡片关了，那块区域还挡着桌面」
     if ((el.id === 'duration-card' || el.id === 'adjust-card') && !el.classList.contains('show')) return true;
-    if (el.id === 'energy-hud' && !el.classList.contains('show')) return true;
     if (el.classList.contains('leaving')) return true; // 推荐卡退场动画期间
     return false;
   };
@@ -271,8 +250,9 @@ function collectHotRects(): HotRect[] {
     rects.push({ x, y, w, h });
   };
 
-  // 常驻交互容器（猫不在此窗口：无 pet-wrap / petBodyInWindow，也无 dock）。
-  for (const sel of ['#panel', '#report-modal', '#slide-card', '#duration-card', '#adjust-card', '#energy-hud'] as const) push(document.querySelector(sel));
+  // 常驻交互容器（猫不在此窗口：无 pet-wrap / petBodyInWindow，也无 dock；
+  // HUD 精力条已迁移到 catWin，由猫窗口自行上报命中区）。
+  for (const sel of ['#panel', '#report-modal', '#slide-card', '#duration-card', '#adjust-card'] as const) push(document.querySelector(sel));
   // 精力恢复扇形菜单：#recovery-pop 是 inset:0 全屏**穿透容器**，绝不能整块上报
   // （否则整窗永久不可穿透）。只上报实际可见的 chip（含中央收起钮；弹出动画期间
   // opacity<0.05 会被 hittable 过滤；显隐由 recoveryPop.show 类控制，见 explicitHidden）。
@@ -342,53 +322,9 @@ function setupHitTest(): void {
   reportHotRects(); // 首个渲染帧即可交互
 }
 
-/* ─────────────────────────── HUD 精力条 ───────────────────────────
- * 10 个格子（每格 1 分，ENERGY_MAX=10）：满格全亮，当前格按小数比例填充（半格支持）。
- * 触碰精力条时样式不变（无 hover 形变）；previewing/live 态由 CSS 作用于 .cell i。
- * 猫不在此窗口 → HUD 是窗口内底部常驻的一条奶油 pill（.show 由 boot 加满，
- * 窗口自身的 show/hide 由主进程决定，渲染层不做悬停显隐）。 */
-
-const HUD_CELL_COUNT = ENERGY_MAX;
-const hudCellFills: HTMLElement[] = [];
-
-function initHudCells(): void {
-  hudCells.innerHTML = '';
-  hudCellFills.length = 0;
-  for (let i = 0; i < HUD_CELL_COUNT; i++) {
-    const cell = document.createElement('span');
-    cell.className = 'cell';
-    const fill = document.createElement('i');
-    cell.appendChild(fill);
-    hudCells.appendChild(cell);
-    hudCellFills.push(fill);
-  }
-}
-
-function renderHudCells(v: number): void {
-  const val = Math.min(ENERGY_MAX, Math.max(0, v));
-  const full = Math.floor(val);
-  const frac = val - full;
-  for (let i = 0; i < HUD_CELL_COUNT; i++) {
-    const fill = hudCellFills[i];
-    if (!fill) continue;
-    fill.style.width = i < full ? '100%' : i === full ? `${frac * 100}%` : '0%';
-  }
-}
-
-/** 本地即时反馈：数字 + 格子 + 档位（全部不落库） */
-function renderHud(v: number): void {
-  hudNum.textContent = v.toFixed(1);
-  renderHudCells(v);
-  hudTier.textContent = tierFor(v).label;
-}
-
-/** HUD 恢复显示真实精力（预览/草稿从未落库，energy 一直是真值） */
-function restoreHudFromState(): void {
-  if (!state) return;
-  hudSlider.value = String(state.energy);
-  hudRestEnergy = state.energy;
-  renderHud(state.energy);
-}
+/* HUD 精力条已整体迁移到 catWin（桌宠下方，悬浮显示）——原渲染逻辑
+ * （initHudCells/renderHudCells/renderHud/restoreHudFromState/setupHudSlider/
+ * renderAdjustCountdown）逐行等价地活在 src/renderer/cat/cat-app.ts。 */
 
 /* ─────────────────────────── 滑动确认卡 ───────────────────────────
  * 新模型（绝对精力语义）：
@@ -455,15 +391,11 @@ function updateSlideVisual(target: number): void {
   sValue.className = 's-value ' + (delta > 0.1 ? 'pos' : delta < -0.1 ? 'neg' : 'zero');
   sDelta.textContent = delta === 0 ? 'Δ 0' : `Δ ${fmtDelta(delta)}`;
   sDelta.className = 's-delta ' + (delta > 0.1 ? 'pos' : delta < -0.1 ? 'neg' : 'zero');
-  // 猫不在此窗口：HUD 就是预览面（本地即时反馈，不落库）
-  slidePreviewActive = true;
-  renderHud(target);
-  // 事件默认消耗的精确预览走 IPC（80ms 节流，限制频率）
+  // HUD 已迁移到 catWin（桌宠下方）：拖动预览值走 IPC，主进程转发 hud:preview
+  // 给猫窗口渲染（80ms 节流，限制频率；精确预览值由 previewSlide 计算）
   if (previewDebounce) clearTimeout(previewDebounce);
   previewDebounce = setTimeout(() => {
-    void window.pet.slidePreview(target).then((pv) => {
-      if (pv && slidePreviewActive) renderHud(pv.energy);
-    });
+    void window.pet.slidePreview(target);
   }, 80);
 }
 
@@ -471,10 +403,9 @@ function hideSlide(): void {
   slideCard.classList.remove('show');
   const wasManual = slide?.kind === 'manual-adjust';
   slide = null;
-  slidePreviewActive = false;
   if (previewDebounce) { clearTimeout(previewDebounce); previewDebounce = null; }
-  // 预览结束 → HUD 回到真实精力（调节窗口开启时由窗口逻辑接管，不复位）
-  if (!adjustWin) restoreHudFromState();
+  // 预览结束：slide:cancel/confirm 都会触发状态推送，主进程随 flushState
+  // 发 hud:preview(null)，catWin HUD 自动恢复真实精力
   // 兜底：确保窗口模式回到 pet（panel 的宽限期会让整窗短暂挡点击）
   if (!panel.classList.contains('open')) void window.pet.setMode('pet');
   if (wasManual && state) toast(`还是 ${state.energy.toFixed(1)} 分，没变～`);
@@ -510,90 +441,19 @@ function setupSlide(): void {
   });
 }
 
-/* ─────────────────────────── HUD 进度条调节（平时预览 / 事件后生效） ───────────────────────────
- * 双模式滑块：
- *
- * 1) 无调节窗口（平时）：自由滑动 → 只驱动本地预览（数字/格子/档位），
- *    **不写任何精力值**；松手（change）→ 回弹到滑动前的真实精力。
- *    adjustDraft IPC 在无窗口时主进程返回 null，是第二重防线（即使
- *    渲染层状态错乱也不会写入）。
- *
- * 2) 有调节窗口（完成事件后）：滑动 = adjustDraft(target)，写入主进程草稿；
- *    7 秒静置内可反复微调（拖动重置倒计时，主进程另有 60s 硬上限）；
- *    到点自动切确认弹窗相位（倒计时角标由本层按镜像 expiresAt 自渲染）。
- */
+/* ─────────────────────────── 调节窗口（7s 微调 → 确认弹窗） ───────────────────────────
+ * HUD 双模式滑块与倒计时角标已随 #energy-hud 迁移到 catWin（桌宠下方）：
+ * 调节窗期间猫窗口强制显示 HUD（草稿滑条写 adjustDraft + 角标倒计时），
+ * 本窗口的调节弹窗（adjust-card）滑条同样写草稿，两个入口经状态推送保持一致。 */
 
-function setupHudSlider(): void {
-  const clamp01 = (v: number): number => Math.min(ENERGY_MAX, Math.max(0, Math.round(v * 2) / 2));
-
-  hudSlider.addEventListener('pointerdown', () => {
-    if (adjustWin) return; // 窗口模式不回弹，起点就是草稿
-    hudPreviewing = true;
-    hudRestEnergy = state?.energy ?? 0;
-    hudBarTrack.classList.add('previewing');
-  });
-
-  hudSlider.addEventListener('input', () => {
-    const v = clamp01(Number(hudSlider.value));
-    if (adjustWin) {
-      // 事件后调节：写入草稿（主进程校验窗口存在性）；
-      // 回执刷新镜像 → 倒计时立刻体现「拖动重置」
-      renderHud(v);
-      void window.pet.adjustDraft(v).then((w) => {
-        if (w) { adjustWin = w; renderAdjustCountdown(); }
-      });
-    } else {
-      // 平时：纯本地预览
-      if (hudPreviewing) renderHud(v);
-    }
-  });
-
-  hudSlider.addEventListener('change', () => {
-    if (adjustWin || !hudPreviewing) return;
-    // 松手回弹：恢复滑动前的真实状态
-    hudPreviewing = false;
-    hudBarTrack.classList.remove('previewing');
-    const rest = clamp01(hudRestEnergy);
-    hudSlider.value = String(rest);
-    if (state) renderHud(state.energy);
-  });
-}
-
-/* ─────────────────────────── 调节窗口（7s 微调 → 确认弹窗） ─────────────────────────── */
-
-function stopCountdown(): void {
-  if (adjustCountdown) { clearInterval(adjustCountdown); adjustCountdown = null; }
-}
-
-/** 倒计时角标：始终读**最新镜像**的 expiresAt（拖动微调后主进程重置窗口，回执刷新镜像） */
-function renderAdjustCountdown(): void {
-  if (!adjustWin) return;
-  const remain = Math.max(0, Math.ceil((adjustWin.expiresAt - Date.now()) / 1000));
-  hudAdjustCount.textContent = String(remain);
-  if (remain <= 0) stopCountdown(); // confirming 相位由状态推送驱动
-}
-
-/** 进入窗口：显示倒计时角标 + HUD 滑块切换为「可写」模式 */
+/** 进入窗口：提示 + 收起可能残留的弹窗（角标/草稿滑条在 catWin HUD 上） */
 function enterAdjusting(w: AdjustWindow): void {
-  stopCountdown();
   adjustCard.classList.remove('show');
-  hudAdjustBadge.hidden = false;
-  hudBarTrack.classList.add('live');
-  renderAdjustCountdown();
-  adjustCountdown = setInterval(renderAdjustCountdown, 250);
-  hudSlider.value = String(w.draftEnergy);
-  renderHud(w.draftEnergy);
-  hud.classList.add('show'); // 调节窗期间 HUD 出现（草稿滑条+角标）；exitAdjust 收起
   toast(`完成了「${w.label}」～ 7 秒内可微调精力`, 3200);
-  // HUD 变为可交互（进度条现在写入草稿），同步纳入热区
-  reportHotRects();
 }
 
 /** 到点：切确认弹窗（显示当前草稿 vs 事件默认精力值） */
 function enterConfirming(w: AdjustWindow): void {
-  stopCountdown();
-  hudAdjustBadge.hidden = true;
-  hudBarTrack.classList.remove('live');
   aSub.textContent = `${w.icon} ${w.label}`;
   aCurrent.textContent = w.draftEnergy.toFixed(1);
   aDefault.textContent = w.defaultEnergy.toFixed(1);
@@ -619,17 +479,9 @@ function positionDefaultMark(w: AdjustWindow): void {
 }
 
 function exitAdjust(): void {
-  stopCountdown();
   adjustWin = null;
   adjustCard.classList.remove('show');
-  hudAdjustBadge.hidden = true;
-  hudBarTrack.classList.remove('live', 'previewing');
-  hudPreviewing = false;
-  // HUD 恢复显示真实精力（草稿从未落库，energy 一直是真值；滑动预览中则不打断）
-  if (state && !slidePreviewActive) restoreHudFromState();
-  // 调节窗结束：HUD 收起（精力值常驻展示位在桌宠下方的悬浮胶囊）
-  hud.classList.remove('show');
-  // 弹窗关闭：同步回收命中区
+  // 弹窗关闭：同步回收命中区（catWin HUD 由状态推送自行收起）
   reportHotRects();
 }
 
@@ -642,7 +494,7 @@ function setupAdjustCard(): void {
     if (adjustWin) {
       setAdjustDelta(Math.round((v - adjustWin.baseEnergy) * 2) / 2, adjustWin.actualMinutes);
       void window.pet.adjustDraft(v).then((w) => {
-        if (w) { adjustWin = w; renderAdjustCountdown(); }
+        if (w) adjustWin = w; // 刷新镜像（catWin HUD 角标随状态推送体现拖动重置）
       });
     }
   });
@@ -849,8 +701,7 @@ function closePanel(): void {
 function setupPanel(): void {
   $('panel-close').addEventListener('click', closePanel);
   $('panel-quit').addEventListener('click', () => { void window.pet.quit(); });
-  // HUD 天气图标：点击静默刷新（仅更新 HUD 天气图标，不弹文字气泡/toast）
-  hudWeather.addEventListener('click', () => { void window.pet.weatherRefresh(); });
+  // （HUD 天气图标的静默刷新已随 HUD 迁移到 catWin）
 
   // 任务添加：标题 + 预估消耗（0–5）+ 预估分钟
   const addTask = (): void => {
@@ -1136,17 +987,8 @@ function applyState(s: AppState): void {
   const prev = state;
   state = s;
 
-  // HUD（调节窗口期间显示草稿值、滑动卡预览期间显示预览值，均不被真值覆盖）
-  if (adjustWin) {
-    hudTier.textContent = tierFor(adjustWin.draftEnergy).label;
-  } else if (!slidePreviewActive) {
-    hudNum.textContent = s.energy.toFixed(1);
-    renderHudCells(s.energy);
-    hudSlider.value = String(s.energy);
-    hudRestEnergy = s.energy;
-    hudTier.textContent = tierFor(s.energy).label;
-  }
-  hudWeather.textContent = WEATHER_ICON[s.weather.condition] ?? '🌤️';
+  // （HUD 已迁移到 catWin：数值/档位/天气/草稿同步由猫窗口的 applyHudState 处理，
+  //  两窗共享同一份 state:update 推送）
   // 面板副标题：情绪×天气一句话（与旧 panelSub 等价）
   panelSub.textContent = describeEmotion(s.emotion, s.weather)
     + (s.emotion.pulseActive ? ` · pulse:${s.emotion.pulse}` : '');
@@ -1160,7 +1002,7 @@ function applyState(s: AppState): void {
     hideSlide();
   }
 
-  // 调节窗口相位驱动（adjusting → 角标倒计时；confirming → 确认弹窗）
+  // 调节窗口相位驱动（adjusting → catWin HUD 角标倒计时；confirming → 本窗确认弹窗）
   const aw = s.adjustWindow;
   if (aw) {
     const isNew = !adjustWin || adjustWin.refId !== aw.refId || adjustWin.openedAt !== aw.openedAt;
@@ -1171,14 +1013,8 @@ function applyState(s: AppState): void {
     } else if (aw.phase === 'confirming' && !adjustCard.classList.contains('show')) {
       enterConfirming(aw);
     }
-    // 草稿值同步（另一入口微调后，HUD 与弹窗保持一致）
-    if (aw.phase === 'adjusting' && !hudPreviewing) {
-      hudSlider.value = String(aw.draftEnergy);
-      hudNum.textContent = aw.draftEnergy.toFixed(1);
-      renderHudCells(aw.draftEnergy);
-    }
   } else if (adjustWin) {
-    // 窗口关闭（已提交/已取消）→ 复位 HUD 与弹窗
+    // 窗口关闭（已提交/已取消）→ 复位弹窗
     exitAdjust();
   }
 
@@ -1198,16 +1034,13 @@ function applyState(s: AppState): void {
 /* ─────────────────────────── 启动 ─────────────────────────── */
 
 function boot(): void {
-  initHudCells();
-  // HUD 不再常驻：精力值已移到桌宠下方的悬浮胶囊（catWin）。
-  // uiWin 的 HUD 仅在事件后调节窗期间出现（草稿滑条 + 倒计时角标）。
+  // HUD 已整体迁移到 catWin（桌宠下方，悬浮显示）——本窗口不再有 HUD 初始化
   syncRingCenter();
   paintRange(sSlider);
   paintRange(aSlider);
 
   setupHitTest();
   setupSlide();
-  setupHudSlider();
   setupAdjustCard();
   setupDurationCard();
   setupPanel();

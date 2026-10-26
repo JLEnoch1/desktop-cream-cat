@@ -17,9 +17,9 @@ import type { MoodParams } from './mood.js';
 import { NEUTRAL_MOOD } from './mood.js';
 
 export const CAT_W = 360;
-/** 窗口高 = 猫体区 374 + 底部精力值胶囊条 38（悬浮时显示，绑定在桌宠下方） */
-export const CAT_H = 412;
-/** 脚底线：物理/绘制锚点（窗口底部留出 HUD 条，脚底线不随窗高变化） */
+/** 窗口高 = 猫体区 374 + 底部精力值 HUD 条带 50（原有 #energy-hud 迁移至此，悬浮显示） */
+export const CAT_H = 424;
+/** 脚底线：物理/绘制锚点（窗口底部留出 HUD 条带，脚底线不随窗高变化） */
 export const CAT_GROUND = 374;
 export const CAT_CX = CAT_W / 2;
 

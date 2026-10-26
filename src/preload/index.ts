@@ -143,8 +143,8 @@ const catApi = {
   setDragActive: (active: boolean): void => {
     ipcRenderer.send('cat:dragActive', active);
   },
-  /** 猫体命中区（窗口内 DIP 坐标）：主进程 50ms 轮询光标做 click-through */
-  hotRect: (rect: { x: number; y: number; w: number; h: number }): void => {
+  /** 命中区（窗口内 DIP 坐标）：猫体 + 显示中的精力 HUD；主进程 50ms 轮询光标做 click-through */
+  hotRect: (rect: { x: number; y: number; w: number; h: number } | { x: number; y: number; w: number; h: number }[]): void => {
     ipcRenderer.send('cat:hotRect', rect);
   },
   /** 全局敲键（Bongo Cat）：{code, down} */
@@ -155,6 +155,9 @@ const catApi = {
   onMood: (cb: (mood: CatMoodPayload) => void): Unsub => subscribe('cat:mood', cb),
   /** 领域事件反应：{reaction, text?} → 表情插播 + 气泡 */
   onReact: (cb: (r: CatReactPayload) => void): Unsub => subscribe('cat:react', cb),
+  /** uiWin 滑动卡拖动 → 预览精力值转发（null = 预览结束，恢复真实值）。
+   *  HUD 精力条迁移到猫窗口后，跨窗口的预览联动靠这条通道。 */
+  onHudPreview: (cb: (energy: number | null) => void): Unsub => subscribe('hud:preview', cb),
   reportError: (info: { source: string; message: string; stack?: string }): void => {
     ipcRenderer.send('renderer:error', info);
   },
