@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <title>精力桌宠 · 卡片流</title>
+  <link rel="stylesheet" href="./ui.css" />
+</head>
+<body>
+  <!--
+    uiWin（400×620，锚定屏幕右下角，主进程按需 show/hide）。
+    奶油猫设计语言：奶油纸感卡片（#FFFDF8 底 + 墨线描边 + 贴纸硬阴影）。
+    猫本体在 catWin，不在本窗口 —— 本窗口只承载领域卡片流 + 底部 HUD 精力条。
+    DOM 顺序即绘制层级（同级 position:absolute 无 z-index 时后者覆盖前者）。
+  -->
+  <div id="stage">
+
+    <!-- 精力 HUD：固定在窗口底部的奶油 pill（10 格精力条 + 双模式滑块） -->
+    <div id="energy-hud" data-interactive>
+      <span class="weather" id="hud-weather" role="button" title="刷新天气">🌤️</span>
+      <span class="num" id="hud-num">7.0</span>
+      <span class="bar" id="hud-bar-track">
+        <span class="cells" id="hud-cells" aria-hidden="true"></span>
+        <input type="range" id="hud-slider" min="0" max="10" step="0.5" value="7"
+               aria-label="精力调节" />
+      </span>
+      <span class="tier" id="hud-tier">平稳</span>
+      <span class="adjust-badge" id="hud-adjust-badge" hidden>调节中 <b id="hud-adjust-count">7</b>s</span>
+    </div>
+
+    <!-- AI 推荐卡片堆栈 -->
+    <div id="rec-stack" data-interactive></div>
+
+    <!-- 滑动确认卡片（晨间基线 / 临时调节预览） -->
+    <div id="slide-card" data-interactive>
+      <div class="s-title" id="s-title">完成任务</div>
+      <div class="s-sub" id="s-sub">—</div>
+      <div class="s-value-row">
+        <span class="s-value zero" id="s-value">7.0</span>
+        <span class="s-unit">分</span>
+        <span class="s-delta" id="s-delta">Δ 0</span>
+      </div>
+      <div class="s-predicted" id="s-predicted-row"><span class="lead">事件默认</span> <b id="s-predicted">0</b>（仅参考）· 滑动确认你当前的真实精力</div>
+      <div class="slider-track">
+        <div class="zero-mark" id="s-base-mark"></div>
+        <input type="range" id="s-slider" min="0" max="10" step="0.5" value="7" />
+      </div>
+      <div class="slider-labels"><span id="s-min">0</span><span id="s-mid">5</span><span id="s-max">10</span></div>
+      <textarea class="s-note" id="s-note" rows="1" maxlength="120" placeholder="备注（可选）：为什么是这个分数？"></textarea>
+      <div class="s-actions">
+        <button class="btn ghost" id="s-cancel">先不了</button>
+        <button class="btn" id="s-confirm">确认</button>
+      </div>
+    </div>
+
+    <!-- 任务时长确认卡（流程第一步：先确认实际时长，再调精力） -->
+    <div id="duration-card" data-interactive>
+      <div class="s-title">任务完成</div>
+      <div class="s-sub" id="d-sub">—</div>
+      <div class="d-row">
+        <label for="d-minutes">实际花了多久</label>
+        <input type="number" id="d-minutes" min="0" max="1440" step="1" value="30" />
+        <span class="d-unit">分钟</span>
+      </div>
+      <div class="d-est" id="d-est">预估 30 分钟</div>
+      <div class="s-actions">
+        <button class="btn ghost" id="d-cancel">先不了</button>
+        <button class="btn" id="d-confirm">确认时长</button>
+      </div>
+    </div>
+
+    <!-- 精力调节确认弹窗（7 秒窗口结束后弹出；Enter 提交 / Esc 放弃） -->
+    <div id="adjust-card" data-interactive>
+      <div class="s-title">确认精力变化</div>
+      <div class="s-sub" id="a-sub">—</div>
+      <div class="a-compare">
+        <div class="a-cell">
+          <b id="a-current">7.0</b>
+          <span>当前草稿</span>
+        </div>
+        <div class="a-arrow">→</div>
+        <div class="a-cell">
+          <b id="a-default">7.0</b>
+          <span>事件默认</span>
+        </div>
+      </div>
+      <div class="a-delta" id="a-delta">Δ 0 · 用时 —</div>
+      <div class="slider-track">
+        <div class="zero-mark" id="a-default-mark"></div>
+        <input type="range" id="a-slider" min="0" max="10" step="0.5" value="7" />
+      </div>
+      <textarea class="s-note" id="a-note" rows="1" maxlength="120" placeholder="备注（可选）"></textarea>
+      <div class="s-actions">
+        <button class="btn ghost" id="a-cancel">放弃调节</button>
+        <button class="btn" id="a-confirm">确认并记录</button>
+      </div>
+    </div>
+
+    <!-- 任务面板（panel 模式） -->
+    <div id="panel" data-interactive>
+      <div class="panel-head">
+        <span class="mark" aria-hidden="true">
+          <!-- 奶油猫头（favicon.svg 同款内联）：面板头部小装饰 -->
+          <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
+            <path d="M6 8.9 6.5 4.9 9.7 7" stroke="#FFFDF8" stroke-opacity=".72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 8.9 15.5 4.9 12.3 7" stroke="#FFFDF8" stroke-opacity=".72" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8.5 8.2h5A4.4 4.4 0 0 1 18 12.4v.6a4.3 4.3 0 0 1-4.3 4.3H8.3A4.3 4.3 0 0 1 4 13v-.6a4.4 4.4 0 0 1 4.5-4.2Z" stroke="#FFFDF8" stroke-width="1.4"/>
+            <circle cx="8.9" cy="12.6" r=".95" fill="#FFFDF8"/>
+            <circle cx="13.1" cy="12.6" r=".95" fill="#FFFDF8"/>
+          </svg>
+        </span>
+        <div class="head-txt">
+          <h1 id="panel-title">精力控制台</h1>
+          <div class="sub" id="panel-sub">—</div>
+        </div>
+        <button class="icon-btn" id="panel-quit" title="退出应用">⏻</button>
+        <button class="icon-btn" id="panel-close" title="收起">✕</button>
+      </div>
+      <div class="panel-body">
+        <div class="tab-page active" data-page="tasks">
+          <div class="task-add">
+            <input type="text" id="task-title" placeholder="新任务…" maxlength="60" />
+            <input type="number" id="task-cost" class="cost" min="0" max="5" step="0.5" value="1" title="预估消耗（0–5）" />
+            <input type="number" id="task-minutes" class="cost" min="0" max="1440" step="5" value="30" title="预估时长（分钟）" />
+            <button class="btn sm" id="task-add-btn">添加</button>
+          </div>
+          <div id="task-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 精力恢复扇形菜单（onUiCmd openRecovery 唤起；径向 chips 围绕窗口底部中心展开）
+         容器 inset:0 但永远 pointer-events:none，只有 chip 接管指针（click-through 红线） -->
+    <div id="recovery-pop" data-interactive>
+      <div class="rp-hint">休息一下下 · 点泡泡开始 · Esc 或 ✕ 收起</div>
+      <div class="rp-ring" id="rp-ring"></div>
+      <!-- 中央收起钮（静态，不随 renderRecoveries 重建） -->
+      <button class="rp-chip rp-close" id="rp-close" title="收起 (Esc)">✕</button>
+      <div id="version-slot"></div>
+    </div>
+
+    <!-- 周报弹窗（state.reportModal 驱动 / onUiCmd showWeekly 主动查看；奶油纸感手账） -->
+    <div id="report-modal" data-interactive>
+      <div class="rm-sheet">
+        <div class="rm-head">
+          <div class="rm-head-txt">
+            <h2>本周精力手账</h2>
+            <div class="rm-sub" id="rm-range">—</div>
+          </div>
+          <button class="icon-btn" id="rm-close" title="关闭">✕</button>
+        </div>
+        <ul class="rm-list" id="rm-list"></ul>
+        <div class="rm-sec" id="rm-ai-sec">
+          <h3>AI 推荐默认值</h3>
+          <ul class="rm-list rm-ai" id="rm-ai"></ul>
+        </div>
+        <div class="rm-sec" id="rm-dec-sec">
+          <h3>已确认的变更留痕</h3>
+          <ul class="rm-list rm-dec" id="rm-dec"></ul>
+        </div>
+        <div class="rm-note" id="rm-note"></div>
+        <div class="rm-actions">
+          <button class="btn" id="rm-ack">已确认</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 奶油气泡 toast（白底墨线，替代旧深色 toast） -->
+    <div id="toast"></div>
+  </div>
+  <script src="./ui.js"></script>
+</body>
+</html>
