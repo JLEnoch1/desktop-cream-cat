@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>下载 奶油猫 · CreamCat</title>
-<meta name="description" content="奶油猫 CreamCat 下载——会帮你看着电量的桌面精力猫。Windows 与 macOS 同一个通用版本，无需注册，安装后自动启动。">
+<meta name="description" content="奶油猫 CreamCat 下载——会帮你看着电量的桌面精力猫。看看它的七种姿态、晨间基线卡、每日复盘清单与周五周报手账，以及精力账本、天气情绪、Bongo 键盘陪打等功能。Windows 与 macOS 同一个通用版本，无需注册，安装后自动启动。">
 <meta name="theme-color" content="#F6F3ED">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
@@ -28,6 +28,13 @@
         <span class="brand-en">Cream Cat</span>
       </span>
     </a>
+    <nav class="topnav">
+      <a href="#poses">姿态</a>
+      <a href="#ui">卡片</a>
+      <a href="#features">功能</a>
+      <a href="#studio">定制</a>
+      <a href="#download" class="nav-cta">下载</a>
+    </nav>
     <div class="topmeta">
       <span>v2.0.0</span>
       <span class="sep">/</span>
@@ -74,7 +81,7 @@
       </div>
     </div>
 
-    <div class="hero-right anim d3">
+    <div class="hero-right anim d3" id="download">
       <div class="card">
         <div class="card-head">
           <span class="head-label">电脑端</span>
@@ -125,6 +132,396 @@
     </div>
   </section>
 
+  <!-- ═══════════ 姿态图鉴 ═══════════ -->
+  <section class="section poses" id="poses">
+    <div class="sec-head">
+      <div class="kicker">Pose Gallery · 姿态图鉴</div>
+      <h2>七种姿态，住在你的桌面底边</h2>
+      <p>散步、发呆、舔毛、打盹，被拖被摸都有反应。下面每一帧都取自 app 里这只猫本猫。</p>
+    </div>
+
+    <div class="catwalk" aria-hidden="true">
+      <div class="cw-cat frames3">
+        <img src="assets/poses/cat-walkside-1.webp" alt="">
+        <img src="assets/poses/cat-walkside-2.webp" alt="">
+        <img src="assets/poses/cat-walkside-3.webp" alt="">
+      </div>
+      <div class="cw-ground"></div>
+    </div>
+
+    <div class="pose-grid">
+
+      <article class="pose-card">
+        <div class="pose-stage">
+          <img class="fx-breathe" src="assets/poses/cat-idle.webp" alt="奶油猫发呆站姿">
+        </div>
+        <div class="pose-info">
+          <h3>发呆 <span class="pose-key mono">idle</span></h3>
+          <p>原地站着看你，尾巴尖偶尔动一下，呼吸轻轻的。</p>
+        </div>
+      </article>
+
+      <article class="pose-card">
+        <div class="pose-stage">
+          <span class="fx-steps" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div class="frames2 fx-bob">
+            <img src="assets/poses/cat-walk-1.webp" alt="奶油猫迎面散步第一帧">
+            <img src="assets/poses/cat-walk-2.webp" alt="奶油猫迎面散步第二帧">
+          </div>
+        </div>
+        <div class="pose-info">
+          <h3>散步 <span class="pose-key mono">walk</span></h3>
+          <p>沿屏幕底边踱步，还会跳上窗口顶边巡游。精力越足，越走得欢。</p>
+        </div>
+      </article>
+
+      <article class="pose-card">
+        <div class="pose-stage">
+          <span class="fx-zzz" aria-hidden="true"><b>z</b><b>Z</b><b>z</b></span>
+          <img class="fx-breathe-slow" src="assets/poses/cat-sleep.webp" alt="奶油猫打盹">
+        </div>
+        <div class="pose-info">
+          <h3>打盹 <span class="pose-key mono">sleep</span></h3>
+          <p>精力见底就倒头睡给你看——它困了，你也该歇了。</p>
+        </div>
+      </article>
+
+      <article class="pose-card">
+        <div class="pose-stage stage-tall">
+          <div class="fx-swing">
+            <img src="assets/poses/cat-drag.webp" alt="奶油猫被拎起">
+          </div>
+        </div>
+        <div class="pose-info">
+          <h3>被拎起 <span class="pose-key mono">drag</span></h3>
+          <p>拖到哪都行，甩出去也会稳稳落地，然后假装什么都没发生。</p>
+        </div>
+      </article>
+
+      <article class="pose-card">
+        <div class="pose-stage">
+          <span class="fx-hearts" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 14s-5.2-3.2-5.2-6.6A2.9 2.9 0 0 1 8 5.6a2.9 2.9 0 0 1 5.2 1.8C13.2 10.8 8 14 8 14Z"/></svg>
+            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 14s-5.2-3.2-5.2-6.6A2.9 2.9 0 0 1 8 5.6a2.9 2.9 0 0 1 5.2 1.8C13.2 10.8 8 14 8 14Z"/></svg>
+            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 14s-5.2-3.2-5.2-6.6A2.9 2.9 0 0 1 8 5.6a2.9 2.9 0 0 1 5.2 1.8C13.2 10.8 8 14 8 14Z"/></svg>
+          </span>
+          <img class="fx-nuzzle" src="assets/poses/cat-pet.webp" alt="奶油猫被摸头">
+        </div>
+        <div class="pose-info">
+          <h3>被摸头 <span class="pose-key mono">pet</span></h3>
+          <p>摸一摸就眯眼蹭手，心情好的时候撒出小爱心。</p>
+        </div>
+      </article>
+
+      <article class="pose-card">
+        <div class="pose-stage">
+          <span class="fx-notes" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="5" cy="11.4" r="2.4"/><path d="M7.4 11.4V3.2l5.4-1.2v8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10.4" cy="9.4" r="2.4"/></svg>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="5" cy="11.4" r="2.4"/><path d="M7.4 11.4V3.2l5.4-1.2v8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10.4" cy="9.4" r="2.4"/></svg>
+          </span>
+          <img class="fx-beat" src="assets/poses/cat-tap.webp" alt="奶油猫抬爪敲键盘">
+        </div>
+        <div class="pose-info">
+          <h3>敲键盘陪打 <span class="pose-key mono">bongo</span></h3>
+          <p>你一打字，它就抬爪跟着节拍——Bongo Cat 加班限定款。</p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ═══════════ 纸感卡片流 ═══════════ -->
+  <section class="section uicards" id="ui">
+    <div class="sec-head">
+      <div class="kicker">Card Flow · 一天的仪式</div>
+      <h2>它不刷屏，只在关键节点递上一张纸</h2>
+      <p>开机后的晨间基线、每天 17:30 的复盘清单、周五要亲手确认的完整周报——都是同一套奶油纸感卡片：白底、墨线描边、贴纸硬阴影。用完即隐，桌面平时只有猫。</p>
+    </div>
+
+    <div class="ui-grid">
+
+      <!-- 晨间基线卡 -->
+      <figure class="ui-cell">
+        <div class="ui-when"><i class="dot"></i>早晨 · 开机后</div>
+        <div class="ui-mock">
+          <div class="m-slide">
+            <div class="m-crest">
+              <svg width="26" height="26" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+                <path d="M6 8.9 6.5 4.9 9.7 7" stroke="#20242a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M16 8.9 15.5 4.9 12.3 7" stroke="#20242a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M8.5 8.2h5A4.4 4.4 0 0 1 18 12.4v.6a4.3 4.3 0 0 1-4.3 4.3H8.3A4.3 4.3 0 0 1 4 13v-.6a4.4 4.4 0 0 1 4.5-4.2Z" stroke="#20242a" stroke-width="1.4"/>
+                <circle cx="8.9" cy="12.6" r=".95" fill="#20242a"/>
+                <circle cx="13.1" cy="12.6" r=".95" fill="#20242a"/>
+              </svg>
+            </div>
+            <div class="m-title">早安，今天感觉如何？</div>
+            <div class="m-sub">昨天收尾在 6.5 分。滑动设定今日初始精力</div>
+            <div class="m-rule" aria-hidden="true"></div>
+            <div class="m-seal-wrap">
+              <div class="m-seal">
+                <span class="m-value">6.5</span>
+                <span class="m-unit">分</span>
+              </div>
+              <span class="m-delta">Δ 0</span>
+            </div>
+            <div class="m-predicted"><span>昨日收尾</span> <b>6.5</b>（仅参考）· 滑动确认你当前的真实精力</div>
+            <div class="m-sec-h" aria-hidden="true">今日电量</div>
+            <div class="m-slider" aria-hidden="true">
+              <div class="m-track"><div class="m-fill" style="width:65%"></div></div>
+              <div class="m-zero" style="left:65%"></div>
+              <div class="m-thumb" style="left:65%"></div>
+            </div>
+            <div class="m-labels" aria-hidden="true"><span>0</span><span>5</span><span>10</span></div>
+            <div class="m-note">附言（可选）：为什么是这个分数？</div>
+            <div class="m-sign">
+              <div class="m-stamp" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <ellipse cx="12" cy="15.6" rx="5.4" ry="4.4" fill="#2E5341" fill-opacity=".5"/>
+                  <circle cx="5.4" cy="10.6" r="2.15" fill="#2E5341" fill-opacity=".5"/>
+                  <circle cx="9.5" cy="7.2" r="2.3" fill="#2E5341" fill-opacity=".5"/>
+                  <circle cx="14.5" cy="7.2" r="2.3" fill="#2E5341" fill-opacity=".5"/>
+                  <circle cx="18.6" cy="10.6" r="2.15" fill="#2E5341" fill-opacity=".5"/>
+                </svg>
+              </div>
+              <div class="m-actions">
+                <button class="m-btn ghost" type="button" tabindex="-1">先不了</button>
+                <button class="m-btn" type="button" tabindex="-1">确认</button>
+              </div>
+            </div>
+          </div>
+          <img class="ui-corner fx-breathe" src="assets/poses/cat-idle.webp" alt="">
+        </div>
+        <figcaption class="ui-cap"><b>晨间基线卡</b>一封皇室书信式的信：印章大数字、昨日收尾参考、猫爪火漆落款。滑一下告诉猫今天的起点，它据此决定自己一整天有多活泼。</figcaption>
+      </figure>
+
+      <!-- 每日复盘清单 -->
+      <figure class="ui-cell">
+        <div class="ui-when"><i class="dot"></i>每天 17:30 · 复盘清单</div>
+        <div class="ui-mock">
+          <div class="m-sheet">
+            <div class="m-head">
+              <div>
+                <h3 class="m-h2">本周精力手账</h3>
+                <div class="m-rsub">10/20 – 10/26 · 共 23 条留痕</div>
+              </div>
+              <span class="m-x" aria-hidden="true">✕</span>
+            </div>
+            <ul class="m-list">
+              <li><span class="m-tick" aria-hidden="true"></span><span>平均精力</span><b class="m-val">7.2 分</b></li>
+              <li><span class="m-tick" aria-hidden="true"></span><span>精力区间</span><b class="m-val">4.5 ~ 9.0</b></li>
+              <li><span class="m-tick" aria-hidden="true"></span><span>完成任务</span><b class="m-val">12 件</b></li>
+              <li><span class="m-tick" aria-hidden="true"></span><span>恢复次数</span><b class="m-val">8 次</b></li>
+              <li><span class="m-tick" aria-hidden="true"></span><span>最耗时段</span><b class="m-val">15:00 前后</b></li>
+              <li><span class="m-tick" aria-hidden="true"></span><span>最有效恢复</span><b class="m-val">午睡 +1.8</b></li>
+            </ul>
+            <div class="m-notebox">前半周冲得猛，周四下午见底；两次午睡把节奏拉了回来。</div>
+            <div class="m-act"><button class="m-btn" type="button" tabindex="-1">已确认</button></div>
+          </div>
+          <img class="ui-corner fx-breathe" src="assets/poses/cat-tap.webp" alt="">
+        </div>
+        <figcaption class="ui-cap"><b>每日复盘清单</b>六行墨线勾选：均值、区间、任务、恢复、最耗时段、最有效恢复。数据全部来自事件流 fold，猫不拍脑袋。</figcaption>
+      </figure>
+
+      <!-- 每周复盘（周五完整版） -->
+      <figure class="ui-cell">
+        <div class="ui-when"><i class="dot"></i>周五 · 完整周报 · 需亲手确认</div>
+        <div class="ui-mock">
+          <div class="m-sheet">
+            <div class="m-head">
+              <div>
+                <h3 class="m-h2">本周精力手账</h3>
+                <div class="m-rsub">10/20 – 10/26 · 共 31 条留痕</div>
+              </div>
+            </div>
+            <ul class="m-list">
+              <li><span class="m-tick" aria-hidden="true"></span><span>平均精力</span><b class="m-val">7.2 分</b></li>
+              <li><span class="m-tick" aria-hidden="true"></span><span>完成任务</span><b class="m-val">12 件</b></li>
+              <li><span class="m-tick" aria-hidden="true"></span><span>最有效恢复</span><b class="m-val">午睡 +1.8</b></li>
+            </ul>
+            <div class="m-sec">
+              <h4>AI 推荐默认值</h4>
+              <ul class="m-list">
+                <li><span class="m-tick" aria-hidden="true"></span><span>午睡</span><b class="m-val">建议 +2</b></li>
+                <li class="m-ev">近 14 天用了 4 次 · 3 次调低 · 2 次吻合</li>
+                <li class="m-msg">你把午睡调低过 3 次，默认 +2.5 可能偏高。</li>
+              </ul>
+            </div>
+            <div class="m-sec">
+              <h4>已确认的变更留痕</h4>
+              <ul class="m-list">
+                <li><span class="m-tick" aria-hidden="true"></span><span class="m-src">AI</span><span>午睡 → +2</span><b class="m-at">10/24</b></li>
+                <li><span class="m-tick" aria-hidden="true"></span><span class="m-src">你</span><span>咖啡 → +1.5</span><b class="m-at">10/22</b></li>
+              </ul>
+            </div>
+            <div class="m-notebox">本周前半段冲得猛，周四精力见底；后半段恢复节奏稳住了，前后半周精力基本持平。</div>
+            <div class="m-act"><button class="m-btn" type="button" tabindex="-1">已确认</button></div>
+          </div>
+          <img class="ui-corner fx-breathe" src="assets/poses/cat-pet.webp" alt="">
+        </div>
+        <figcaption class="ui-cap"><b>每周复盘（周五）</b>清单之上追加 AI 校准建议与变更留痕，每条建议都附证据计数——因果链可见才敢信。周五没有 ✕，必须点「已确认」。</figcaption>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ═══════════ 功能特性 ═══════════ -->
+  <section class="section feats" id="features">
+    <div class="sec-head">
+      <div class="kicker">Features · 功能</div>
+      <h2>可爱在外，精力管理在内</h2>
+      <p>猫只是界面。底下是一套认真的事件溯源精力账本、三层情绪引擎，和一批有仪式感的小工具。</p>
+    </div>
+
+    <div class="feat-grid">
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 2 4.6 10.8h4.2L9 18l6.6-9h-4.3L11 2Z"/></svg>
+        </span>
+        <h3>事件溯源精力账本</h3>
+        <p>每一次消耗与恢复都逐笔记账、可回溯，猫的活力就是你余额的实时读数。</p>
+      </article>
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 16.6S3.4 12.7 3.4 8.5a3.6 3.6 0 0 1 6.6-2.2 3.6 3.6 0 0 1 6.6 2.2c0 4.2-6.6 8.1-6.6 8.1Z"/><path d="M5.6 9.6h2l1.1-1.8 1.4 3 1-1.2h3.3"/></svg>
+        </span>
+        <h3>三层情绪引擎</h3>
+        <p>精力、事件、天气叠成猫的心情：精力高活泼好动，精力低懒得理你、倒头就睡。</p>
+      </article>
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.6 12.4a3.4 3.4 0 0 1 .5-6.8 4.4 4.4 0 0 1 8.3 1.2 2.9 2.9 0 0 1-.6 5.6H6.6Z"/><path d="M7.6 14.8 6.8 17M11 14.8l-.8 2.2M14.4 14.8l-.8 2.2"/></svg>
+        </span>
+        <h3>实时天气联动</h3>
+        <p>IP 定位加级联天气源。天变了，猫头顶挂出线稿小天气：晴、云、雨、雷。</p>
+      </article>
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.4" y="5.4" width="15.2" height="9.2" rx="1.6"/><path d="M5.2 8.4h.01M8 8.4h.01M10.8 8.4h.01M13.6 8.4h.01M5.2 11h.01M8 11h4M14.8 11h.01"/></svg>
+        </span>
+        <h3>Bongo 键盘陪打</h3>
+        <p>本地监听键盘节拍，你一敲字猫就抬爪跟着打，加班也有人捧场。</p>
+      </article>
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="10" cy="10" r="2.2"/><path d="M10 4.2a5.8 5.8 0 0 1 5 2.9M15 12.9a5.8 5.8 0 0 1-5 2.9M5 12.9a5.8 5.8 0 0 1 0-5.8"/><circle cx="10" cy="2.6" r=".9" fill="currentColor" stroke="none"/><circle cx="16.4" cy="6.3" r=".9" fill="currentColor" stroke="none"/><circle cx="16.4" cy="13.7" r=".9" fill="currentColor" stroke="none"/><circle cx="3.6" cy="6.3" r=".9" fill="currentColor" stroke="none"/><circle cx="3.6" cy="13.7" r=".9" fill="currentColor" stroke="none"/></svg>
+        </span>
+        <h3>径向恢复菜单</h3>
+        <p>点一下 ⚡，六枚表情筹码绕着猫头扇形弹出，喝咖啡、午睡、散步一键回血。</p>
+      </article>
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.4 5.6c0-1 .7-1.8 1.7-1.8h9.5c-1 .6-1.7 1.2-1.7 2v9.2c0 1-.7 1.8-1.7 1.8H4.4c1-.6 1.7-1.2 1.7-2V5.6Z"/><path d="M8.2 7.6h5M8.2 10.4h5M8.2 13.2h3"/></svg>
+        </span>
+        <h3>羊皮纸周报</h3>
+        <p>每天 17:30 送来一封魔法卷轴信：墨迹手写、羽毛笔与火漆印，一周一张纸看完。</p>
+      </article>
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.8" y="3.8" width="14.4" height="10.6" rx="1.4"/><path d="M2.8 6.8h14.4M5.4 16.8h9.2"/><path d="M9 9.8 8.4 11h1.9L9.4 13l2-2.4H9.9l.7-1.4L9 9.8Z" fill="currentColor" stroke="none"/></svg>
+        </span>
+        <h3>桌面原生行为</h3>
+        <p>沿屏幕底边散步，跳上窗口顶边踱步，趴在你晒太阳的位置打盹。</p>
+      </article>
+
+      <article class="feat-card">
+        <span class="feat-ico">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4.4" y="8.6" width="11.2" height="8" rx="1.8"/><path d="M7.2 8.6V6.4a2.8 2.8 0 0 1 5.6 0v2.2"/><circle cx="10" cy="12.4" r="1.1" fill="currentColor" stroke="none"/></svg>
+        </span>
+        <h3>零注册 · 零上传</h3>
+        <p>不需要账号，没有广告，不收集任何使用数据，一切都在你本地。装好就在。</p>
+      </article>
+
+    </div>
+
+    <div class="feats-cta">
+      <a class="btn-down" href="#download">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 2.4v7.4M7 9.8L4.1 6.9M7 9.8l2.9-2.9M2.6 12.2h8.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        把它领回桌面
+      </a>
+      <span class="feats-cta-note">macOS 与 Windows · 同一个通用版本 · 免费</span>
+    </div>
+  </section>
+
+  <!-- ═══════════ AI 毛发定制工坊 ═══════════ -->
+  <section class="section studio" id="studio">
+    <div class="sec-head">
+      <div class="kicker">AI Skin Studio · 毛发定制工坊</div>
+      <h2>把你家猫，也做成桌面猫</h2>
+      <p>上传你家小猫的照片或一段短视频，AI 会保留它的毛色与花纹，画出一整套餐桌猫七姿态，打包成可直接装进奶油猫的皮肤——猫还是那只桌面猫，长相换成你的猫。</p>
+    </div>
+
+    <div class="stu-panel" id="stu-panel">
+
+      <div class="stu-off" id="stu-off" hidden>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.4"/><path d="M8 4.8v3.9M8 10.9h.01" stroke-linecap="round"/></svg>
+        <span id="stu-off-txt">生成服务不可用</span>
+      </div>
+
+      <div class="stu-step" id="stu-step1">
+        <div class="stu-step-h"><b>1</b> 上传你家猫</div>
+        <div class="stu-drop" id="stu-drop" role="button" tabindex="0" aria-label="上传猫咪照片或视频">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16.4V7.6m0 0L8.4 11.2M12 7.6l3.6 3.6"/><path d="M4.4 15.6v2.2a1.8 1.8 0 0 0 1.8 1.8h11.6a1.8 1.8 0 0 0 1.8-1.8v-2.2"/><circle cx="17.4" cy="5.4" r=".7" fill="currentColor"/></svg>
+          <strong>点选，或把照片 / 视频拖进来</strong>
+          <span class="stu-drop-sub">照片 1–3 张，或一段短视频 · JPG / PNG / WEBP / MP4 · 建议全身、光线好、画面里只有一只猫</span>
+          <span class="stu-drop-err" hidden></span>
+        </div>
+        <input type="file" id="stu-file" accept="image/*,video/*" multiple hidden>
+        <div class="stu-vframes" id="stu-vframes" hidden>
+          <p class="stu-vframes-tip" id="stu-vframes-tip"></p>
+          <div class="stu-vstrip"></div>
+        </div>
+        <div class="stu-refs-row">
+          <div class="stu-refs" id="stu-refs"></div>
+          <span class="stu-refs-count" id="stu-refs-count"></span>
+        </div>
+        <p class="stu-note">照片只发送给图像大模型用于本次生成，本地服务不留存任何图片；未配置 API Key 时此功能整体不可用。不用本功能时，奶油猫依旧零注册、零上传。</p>
+      </div>
+
+      <div class="stu-step" id="stu-step2">
+        <div class="stu-step-h"><b>2</b> 起个名字，开画</div>
+        <div class="stu-run">
+          <input id="stu-name" type="text" maxlength="24" placeholder="猫咪名字，如：布丁" autocomplete="off">
+          <button type="button" id="stu-go" class="stu-btn" disabled>开始生成七姿态</button>
+          <button type="button" id="stu-cancel" class="stu-btn ghost" hidden>取消</button>
+        </div>
+        <div class="stu-progress" id="stu-progress" hidden>
+          <div class="stu-bar"><i id="stu-bar-fill"></i></div>
+          <span class="stu-progress-txt" id="stu-progress-txt"></span>
+        </div>
+        <div class="stu-grid" id="stu-grid"></div>
+      </div>
+
+      <div class="stu-step" id="stu-step3" hidden>
+        <div class="stu-step-h"><b>3</b> 预览满意，领回桌面</div>
+        <div class="stu-dl">
+          <button type="button" id="stu-zip" class="stu-btn big">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 2.4v7.4M7 9.8L4.1 6.9M7 9.8l2.9-2.9M2.6 12.2h8.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            下载皮肤包 <b class="mono" id="stu-zip-name">creamcat-skin-my-cat.zip</b>
+          </button>
+          <button type="button" id="stu-again" class="stu-btn ghost">不满意，整套重画</button>
+        </div>
+        <div class="stu-install">
+          <h4>安装指引（约 1 分钟）</h4>
+          <ol>
+            <li>安装并打开奶油猫，右键桌面猫 →「打开皮肤文件夹」。</li>
+            <li>解压皮肤包，把里面的 <code class="mono" id="stu-folder-name">my-cat</code> 文件夹整个放进 skins 目录。</li>
+            <li>把同目录下原来的 <code class="mono">default</code> 文件夹改名为 <code class="mono">.default</code>（点开头的文件夹会被忽略），你的猫即上位。</li>
+            <li>桌宠约 1 秒内自动换上（也可右键 →「重新加载皮肤」）。想换回内置奶油猫，把 <code class="mono">.default</code> 改回 <code class="mono">default</code> 即可。</li>
+          </ol>
+          <p class="stu-paths">皮肤目录 — macOS：<code class="mono">~/Library/Application Support/CreamCat/skins/</code> · Windows：<code class="mono">%APPDATA%\CreamCat\skins\</code></p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
 </main>
 
 <footer class="foot">
@@ -134,5 +531,6 @@
   </div>
 </footer>
 
+<script src="cat-studio.js" defer></script>
 </body>
 </html>

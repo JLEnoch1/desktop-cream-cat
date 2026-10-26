@@ -4,6 +4,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { handleCatSkinApi } from './cat-skin-api.mjs'
 
 const root = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), 'site')
 const port = Number(process.argv[2] || 4321)
@@ -16,11 +17,21 @@ const MIME = {
   '.dmg': 'application/x-apple-diskimage',
   '.exe': 'application/vnd.microsoft.portable-executable',
   '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
 }
 
 http
   .createServer((req, res) => {
     const urlPath = decodeURIComponent(new URL(req.url, 'http://localhost').pathname)
+    if (urlPath.startsWith('/api/cat-skin/')) {
+      handleCatSkinApi(req, res, urlPath).catch((e) => {
+        if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ ok: false, code: 'Internal', message: e.message }))
+      })
+      return
+    }
     let file = path.join(root, urlPath === '/' ? 'index.html' : urlPath)
     if (!file.startsWith(root)) {
       res.writeHead(403).end('forbidden')
