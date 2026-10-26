@@ -1,0 +1,21 @@
+{
+  "id": "loaf",
+  "name": "面包猫坐",
+  "duration": 5,
+  "text": "面包模式…思考猫生",
+  "useState": "sleep",
+  "pose": {
+    "sx": 1.06,
+    "sy": 0.82,
+    "tailWrap": true,
+    "tailAmp": 0.3,
+    "eyes": "closed",
+    "mouth": "line",
+    "earL": 0,
+    "earR": 0
+  },
+  "anim": {
+    "bounceAmp": 0.015,
+    "bounceFreq": 0.8
+  }
+}

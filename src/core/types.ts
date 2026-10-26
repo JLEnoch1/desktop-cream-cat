@@ -345,7 +345,84 @@ export type CatCmd =
   /** 猫回地面（托盘/右键菜单「回到地面」；顶边趴着时 UI 卡片也需要） */
   | { type: 'go-ground' }
   /** UI 卡片窗口出现/收起：hold=true 时猫停止自主散步（安静陪伴），收起后恢复 */
-  | { type: 'ui-hold'; active: boolean };
+  | { type: 'ui-hold'; active: boolean }
+  /** 播放自定义姿势（右键菜单「摆个姿势」/ --selftest-pose）；def 已由主进程校验 */
+  | { type: 'play-pose'; pose: CustomPoseDef };
+
+/* ─────────────────────────── 自定义姿势（姿势插件） ─────────────────────────── */
+
+/**
+ * 姿势参数覆盖 —— CatPose 可覆盖字段的安全子集（渲染层时钟字段不可覆盖）。
+ * 数值字段在姿势进/出包络内从当前值插值到目标值；枚举/布尔字段过半程切换。
+ * 数值范围由 main/pose-defs.ts sanitizePose 统一钳制。
+ */
+export interface PoseOverrides {
+  /** 横向缩放（0.3–3） */
+  sx?: number;
+  /** 纵向缩放（0.3–3） */
+  sy?: number;
+  /** 整体旋转 rad（±1.5） */
+  rot?: number;
+  eyes?: 'open' | 'blink' | 'happy' | 'closed' | 'wide';
+  mouth?: 'w' | 'o' | 'line';
+  /** 左前爪抬起 0–1 */
+  pawL?: number;
+  /** 右前爪抬起 0–1 */
+  pawR?: number;
+  /** 走路小腿循环 */
+  legsOn?: boolean;
+  /** 四肢张开 0–1 */
+  splay?: number;
+  /** 尾巴摆幅倍率（0–4，1=常态） */
+  tailAmp?: number;
+  /** 歪头 rad（±1） */
+  headTilt?: number;
+  /** 尾巴环抱（面包猫） */
+  tailWrap?: boolean;
+  /** 左耳姿态 0–1（0=竖直，0.55=飞机耳） */
+  earL?: number;
+  /** 右耳姿态 0–1 */
+  earR?: number;
+  /** 睡觉 z 气泡标志 */
+  zzz?: boolean;
+  /** 脸红 */
+  blush?: boolean;
+}
+
+/** 姿势二级动画（代码驱动的正弦扰动，幅度随包络淡入淡出） */
+export interface PoseAnim {
+  /** 摇摆幅度 rad（0–0.35） */
+  swayAmp?: number;
+  /** 摇摆频率 Hz（0.1–8） */
+  swayFreq?: number;
+  /** 弹跳幅度：sy 比例（0–0.35，体积近似守恒联动 sx） */
+  bounceAmp?: number;
+  /** 弹跳频率 Hz（0.1–8） */
+  bounceFreq?: number;
+}
+
+/**
+ * 一条自定义姿势定义（poses/*.json，主进程 pose-defs.ts 校验钳制后经
+ * cat:cmd play-pose 下发）。播放 = FSM 进入 'pose' 状态 duration 秒后回 idle；
+ * 拖拽/甩出随时可打断。触发只走右键菜单与调试把手——不接任何手势
+ * （红线 R10：手势→动作映射与摸头计数互扰，见 docs/pose-plugins.md）。
+ */
+export interface CustomPoseDef {
+  /** 唯一 id（slug，重名去重保留先加载者） */
+  id: string;
+  /** 菜单显示名（≤20 字符） */
+  name: string;
+  /** 播放时长 s（0.5–30，默认 2） */
+  duration: number;
+  /** 气泡文案（≤80 字符；缺省不说话） */
+  text?: string;
+  /** 皮肤表情插播名（expressions 里没有则静默跳过） */
+  expression?: string;
+  /** 皮肤状态帧源（states 名，默认 idle；如 'sleep' 复用睡觉帧+皮肤侧 zzz） */
+  useState?: string;
+  pose?: PoseOverrides;
+  anim?: PoseAnim;
+}
 
 /** 猫心情推送（cat:mood 通道）——领域 AppState 的猫侧投影 */
 export interface CatMoodPayload {

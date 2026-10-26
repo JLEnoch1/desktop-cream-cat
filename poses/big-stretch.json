@@ -1,0 +1,22 @@
+{
+  "id": "big-stretch",
+  "name": "伸个大懒腰",
+  "duration": 2.6,
+  "text": "喵呜——伸个大懒腰!",
+  "pose": {
+    "sx": 1.16,
+    "sy": 0.88,
+    "headTilt": -0.22,
+    "eyes": "closed",
+    "mouth": "o",
+    "pawL": 1,
+    "pawR": 1,
+    "tailAmp": 1.6,
+    "earL": 0.15,
+    "earR": 0.15
+  },
+  "anim": {
+    "swayAmp": 0.02,
+    "swayFreq": 1.2
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "wiggle",
+  "name": "扭扭舞",
+  "duration": 3,
+  "text": "扭扭扭~ 电量补充!",
+  "expression": "happy",
+  "pose": {
+    "eyes": "happy",
+    "blush": true,
+    "tailAmp": 2.4,
+    "earL": 0.2,
+    "earR": 0.2
+  },
+  "anim": {
+    "swayAmp": 0.09,
+    "swayFreq": 5,
+    "bounceAmp": 0.05,
+    "bounceFreq": 5
+  }
+}

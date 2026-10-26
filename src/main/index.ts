@@ -21,8 +21,9 @@ import { join } from 'node:path';
 import { Coordinator } from './coordinator.js';
 import { NativeHelpers } from './native.js';
 import { resolveSkin, watchSkins, ensureUserSkins, SKINS_DIR } from './skins.js';
+import { ensureUserPoses, loadPoses, watchPoses, posesDir } from './pose-plugins.js';
 import { autoLaunchOn, setAutoLaunch, bootstrapAutoLaunch } from './autolaunch.js';
-import type { AppState, PendingSlide, WindowMode, CatLayout, CatLedge, CatMoodPayload } from '../core/types.js';
+import type { AppState, PendingSlide, WindowMode, CatLayout, CatLedge, CatMoodPayload, CustomPoseDef } from '../core/types.js';
 import { pointInRects, fallbackHotRects as fallbackRectsOf, sanitizeRects, type HotRect } from '../core/hittest.js';
 
 // 受限环境（沙箱/无 GPU）兼容：显式传入 --no-sandbox 时自动关闭硬件加速，
@@ -78,6 +79,14 @@ let quitting = false;
 let paused = false;
 /** uiWin 渲染层本地活动 UI（恢复扇形/周报查看态）hint */
 let uiHintActive = false;
+
+/* ── 自定义姿势（姿势插件）：poses/ 目录 JSON → 右键菜单「摆个姿势」 ──
+ * 主进程持有唯一缓存；菜单每次弹出时重建，天然拿到最新表。
+ * play-pose 命令直接携带完整 def，渲染层零常驻状态。 */
+let poseDefs: CustomPoseDef[] = [];
+function refreshPoses(): void {
+  poseDefs = loadPoses();
+}
 
 /* ─────────────────────────── 布局 ─────────────────────────── */
 
@@ -156,6 +165,7 @@ function createCatWindow(): void {
   catWin.on('closed', () => { catWin = null; });
 
   if (process.argv.includes('--selftest-click')) setupSelftestClick();
+  if (process.argv.includes('--selftest-pose')) setupSelftestPose();
   if (process.argv.includes('--selfcheck')) setupSelfcheck();
 }
 
@@ -388,6 +398,26 @@ function stopHitTestLoop(): void {
 /* ─────────────────────────── 右键菜单（动态 popup，非托盘） ─────────────────────────── */
 
 /**
+ * 「摆个姿势」子菜单（姿势插件）：poses/ 目录的自定义姿势逐条列出，
+ * 点击 → cat:cmd play-pose（携带完整 def）。空表给引导文案；
+ * 尾部固定「重新加载 / 打开文件夹」——watch 失效时的手动兜底。
+ */
+function poseSubmenu(): Electron.MenuItemConstructorOptions[] {
+  const items: Electron.MenuItemConstructorOptions[] = poseDefs.length
+    ? poseDefs.map((p) => ({
+        label: p.name,
+        click: () => sendToCat('cat:cmd', { type: 'play-pose', pose: p }),
+      }))
+    : [{ label: '还没有姿势包（打开姿势文件夹添加）', enabled: false }];
+  items.push(
+    { type: 'separator' },
+    { label: '重新加载姿势', click: () => refreshPoses() },
+    { label: '打开姿势文件夹', click: () => { void shell.openPath(posesDir()); } },
+  );
+  return items;
+}
+
+/**
  * 猫右键菜单：每次弹出时重建（Menu.popup 一次性，不存在托盘 setContextMenu
  * 的 SIGABRT 风险），因此可以携带动态信息（精力一句话/暂停状态/开关勾选）。
  */
@@ -440,6 +470,10 @@ function popupCatMenu(): void {
     },
     { label: '现在睡觉', click: () => sendToCat('cat:cmd', { type: 'sleep-now' }) },
   ];
+  template.push(
+    { type: 'separator' },
+    { label: '摆个姿势', submenu: poseSubmenu() },
+  );
   if (isMac && helpers) {
     template.push({
       label: '窗口顶边散步',
@@ -882,6 +916,63 @@ function setupSelftestClick(): void {
   });
 }
 
+/** 自检模式：自定义姿势全链路（poses/ 加载 → cat:cmd play-pose → FSM 'pose' → 定时回 idle）（--selftest-pose [截图路径]） */
+function setupSelftestPose(): void {
+  if (!catWin) return;
+  catWin.webContents.once('did-finish-load', () => {
+    setTimeout(async () => {
+      const wc = catWin?.webContents;
+      const fail = (msg: string): void => {
+        logCrash('selftest-pose FAILED', msg);
+        console.error('[selftest-pose] FAILED:', msg);
+        quitting = true;
+        app.quit();
+      };
+      if (!wc || wc.isDestroyed()) { fail('webContents missing'); return; }
+      const def = poseDefs[0];
+      if (!def) { fail('没有加载到任何姿势（poses/ 目录为空？）'); return; }
+      try {
+        // 1) 主进程侧触发：走右键菜单同一条 cat:cmd 通道。
+        //    桌宠是真实桌面窗口，自检期间用户可能恰好拖拽/甩出猫把姿势打断
+        //    （drag/thrown/pet 皆合法打断）——瞬态干扰容忍：最多重试 3 次。
+        type MidInfo = { state: string; poseSkin: string | null; bubble: string | null; bubbleShown: boolean };
+        let mid: MidInfo | null = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          sendToCat('cat:cmd', { type: 'play-pose', pose: def });
+          await new Promise((res) => setTimeout(res, 700));
+          mid = JSON.parse(await wc.executeJavaScript(
+            'JSON.stringify({ state: window.petDebug.state(),'
+            + ' poseSkin: window.petDebug.poseSkinState ? window.petDebug.poseSkinState() : null,'
+            + ' bubble: (document.getElementById("bubble")||{}).textContent,'
+            + ' bubbleShown: !!(document.getElementById("bubble")||{classList:{contains(){return false}}}).classList.contains("show") })',
+          )) as MidInfo;
+          if (mid?.state === 'pose') break;
+          if (attempt < 3) await new Promise((res) => setTimeout(res, 600));
+        }
+        if (!mid || mid.state !== 'pose') { fail(`姿势中 state=${mid?.state}，期望 pose（3 次重试均被打断？）`); return; }
+        if (def.text && mid.bubble !== def.text) { fail(`气泡=${JSON.stringify(mid.bubble)}，期望 ${JSON.stringify(def.text)}`); return; }
+        // 2) 姿势峰值截图（目检姿态覆盖是否生效）
+        const idx = process.argv.indexOf('--selftest-pose');
+        const outPath = process.argv[idx + 1] && !process.argv[idx + 1]!.startsWith('-')
+          ? process.argv[idx + 1]!
+          : join(app.getPath('temp'), 'cream-cat-selftest-pose.png');
+        const image = await wc.capturePage();
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(outPath, image.toPNG());
+        // 3) 播完应自动回 idle（不再处于 pose）
+        await new Promise((res) => setTimeout(res, def.duration * 1000 + 800));
+        const after = await wc.executeJavaScript('window.petDebug.state()');
+        if (after === 'pose') { fail(`duration=${def.duration}s 后仍停留在 pose`); return; }
+        console.log(`[selftest-pose] PASS id=${def.id} mid=${JSON.stringify(mid)} after=${after} shot=${outPath}`);
+        quitting = true;
+        app.quit();
+      } catch (err) {
+        fail(err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err));
+      }
+    }, 2600);
+  });
+}
+
 /** 自检模式：截猫窗口 + UI 窗口各一张图后退出（--selfcheck [输出路径]） */
 function setupSelfcheck(): void {
   if (!catWin) return;
@@ -960,7 +1051,7 @@ if (!gotLock) {
   quitting = true;
   app.quit();
 } else {
-  logCrash('app start', { argv: process.argv, pid: process.pid, selfcheck: process.argv.includes('--selfcheck'), selftestClick: process.argv.includes('--selftest-click') });
+  logCrash('app start', { argv: process.argv, pid: process.pid, selfcheck: process.argv.includes('--selfcheck'), selftestClick: process.argv.includes('--selftest-click'), selftestPose: process.argv.includes('--selftest-pose') });
   // 安装后自启/重复点击图标：不新开窗口，只把猫窗口提到眼前
   app.on('second-instance', () => {
     if (catWin && !catWin.isDestroyed()) { catWin.showInactive(); }
@@ -975,6 +1066,8 @@ if (!gotLock) {
     process.on('unhandledRejection', (reason) => logCrash('unhandledRejection', reason));
 
     ensureUserSkins();
+    ensureUserPoses();
+    refreshPoses();
     bootstrapAutoLaunch();
 
     coordinator = new Coordinator({ userDataPath: app.getPath('userData') });
@@ -999,6 +1092,10 @@ if (!gotLock) {
 
     const stopWatch = watchSkins(() => sendToCat('cat:cmd', { type: 'skins-updated' }));
     app.on('will-quit', stopWatch);
+
+    // 姿势包热重载：目录变化 → 刷新主进程缓存（菜单下次弹出即生效）
+    const stopPoseWatch = watchPoses(() => refreshPoses());
+    app.on('will-quit', stopPoseWatch);
 
     if (isMac && app.dock) app.dock.hide();
 

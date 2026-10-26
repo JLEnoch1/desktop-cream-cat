@@ -1,0 +1,20 @@
+{
+  "id": "high-five",
+  "name": "击个掌",
+  "duration": 2,
+  "text": "Give me five! 喵~",
+  "expression": "happy",
+  "pose": {
+    "pawR": 1,
+    "eyes": "happy",
+    "mouth": "w",
+    "blush": true,
+    "tailAmp": 2,
+    "earL": 0.2,
+    "earR": 0.2
+  },
+  "anim": {
+    "bounceAmp": 0.06,
+    "bounceFreq": 3
+  }
+}
