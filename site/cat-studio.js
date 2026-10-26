@@ -1,8 +1,10 @@
-/* 奶油猫 CreamCat · AI 毛发定制工坊 — 下载页前端逻辑（零依赖原生 JS，defer 加载）。
+/* 精力桌宠 CreamCat · AI 毛发定制工坊 — 下载页前端逻辑（零依赖原生 JS，defer 加载）。
  *
- * 流程：上传照片/视频 →（视频自动抽帧挑参考帧）→ 按 idle→walk1→walk2→sleep→drag→pet→tap
- * 串行链式生成（非 idle 姿态附带已定稿形象图做参考，锁角色一致性）→ 卡片实时预览 →
- * 浏览器端打包 skin.json v2 + 七帧图为 zip → 附安装指引（解压进 skins 目录即被 app 热重载）。
+ * 流程：上传照片/视频 →（视频自动抽帧挑参考帧）→ 选画风（厚涂Q版/扁平Q版/像素游戏风）与
+ * 输出内容（动作序列帧七姿态 / Live2D 式部件拆层稿×12）→ 按 idle 定稿 → 其余姿态 → 部件
+ * 串行链式生成（非 idle 目标附带定稿形象图做参考，锁「统一画风、同一只猫」）→ 卡片实时预览 →
+ * 浏览器端打包 skin.json v2 + 姿态帧 + parts/ 部件层为 zip → 附安装指引（解压进 skins 目录
+ * 即被 app 热重载；parts/ 为素材稿，app 不直接消费）。
  *
  * 依赖后端 /api/cat-skin/*（scripts/cat-skin-api.mjs，随 npm run site:dev 启动）；
  * 纯静态托管 / file:// 打开时 status 探测失败 → 展示「服务未接入」禁用态，不影响页面其余部分。
@@ -13,10 +15,15 @@
   /* ─────────────── 常量 ─────────────── */
 
   const POSES = ['idle', 'walk1', 'walk2', 'sleep', 'drag', 'pet', 'tap'];
-  const POSE_LABEL = {
+  const PART_IDS = ['face', 'body', 'tail', 'paw-l', 'paw-r', 'mouth', 'eye-l', 'eye-r', 'brow-up', 'brow-low', 'fur-overlay', 'eye-light'];
+  const LABELS = {
     idle: '发呆', walk1: '散步 A', walk2: '散步 B', sleep: '打盹',
     drag: '被拎起', pet: '被摸头', tap: '敲键盘',
+    face: '脸/头轮廓', body: '身体', tail: '尾巴', 'paw-l': '前爪左', 'paw-r': '前爪右',
+    mouth: '嘴巴', 'eye-l': '左眼', 'eye-r': '右眼', 'brow-up': '眉毛上', 'brow-low': '眉毛下',
+    'fur-overlay': '毛发遮挡层', 'eye-light': '眼睛高光/阴影层',
   };
+  const STYLE_LABEL = { chibi: '厚涂 Q 版', flat: '扁平 Q 版', pixel: '像素游戏风' };
   const MAX_REFS = 3;          // DashScope 图像编辑单次最多 3 图
   const IMG_MAX_BYTES = 12e6;  // 原图上限（缩放后远低于 API 10MB 限制）
   const VIDEO_MAX_BYTES = 100e6;
@@ -31,10 +38,14 @@
     enabled: false,
     mock: false,
     model: '',
-    refs: [],            // [{dataURL, label}]
+    refs: [],            // [{dataURL, label, fromVideo?}]
     videoFrames: null,   // [{dataURL, t}] 抽帧候选
     videoSel: new Set(), // 选中的候选下标
-    results: {},         // pose → {image(dataURL), ms}
+    style: 'chibi',      // chibi | flat | pixel
+    wantPoses: true,     // 输出：动作序列帧七姿态
+    wantParts: true,     // 输出：部件拆层稿 ×12
+    results: {},         // target → {image(dataURL), ms}
+    curTargets: [],      // 本轮生成的目标列表
     busy: false,
     aborted: false,
     abortCtl: null,
@@ -47,6 +58,7 @@
     drop: $('#stu-drop'), file: $('#stu-file'),
     refs: $('#stu-refs'), refsCount: $('#stu-refs-count'),
     vframes: $('#stu-vframes'), vframesTip: $('#stu-vframes-tip'),
+    optPoses: $('#stu-opt-poses'), optParts: $('#stu-opt-parts'),
     name: $('#stu-name'), go: $('#stu-go'), cancel: $('#stu-cancel'),
     progress: $('#stu-progress'), barFill: $('#stu-bar-fill'), progressTxt: $('#stu-progress-txt'),
     grid: $('#stu-grid'),
@@ -54,6 +66,19 @@
     folderName: $('#stu-folder-name'), zipName: $('#stu-zip-name'),
     zip: $('#stu-zip'), again: $('#stu-again'),
   };
+
+  /* ─────────────── 目标清单 ─────────────── */
+
+  /** 当前选择下的生成目标：idle 定稿永远在前（部件与姿态的风格锚点） */
+  function currentTargets() {
+    const t = [];
+    if (state.wantPoses) t.push(...POSES);
+    else if (state.wantParts) t.push('idle'); // 只要部件时也先定稿 idle 作锚点
+    if (state.wantParts) t.push(...PART_IDS);
+    return t;
+  }
+
+  const isPose = (t) => POSES.includes(t);
 
   /* ─────────────── 工具 ─────────────── */
 
@@ -66,7 +91,9 @@
   }
 
   function syncGo() {
-    el.go.disabled = !state.enabled || state.busy || state.refs.length === 0;
+    const n = currentTargets().length;
+    el.go.disabled = !state.enabled || state.busy || state.refs.length === 0 || n === 0;
+    el.go.textContent = n ? `开始生成 ${n} 件素材` : '请至少勾选一种输出';
   }
 
   function downscaleDataURL(src, maxSide, quality = 0.88) {
@@ -250,23 +277,27 @@
 
   /* ─────────────── 生成 ─────────────── */
 
-  /** 组参考图：idle 用全部照片；walk2 附 walk1 定稿；其余附 idle 定稿（总 ≤3） */
-  function imagesFor(pose) {
+  /** 组参考图：idle 用全部照片；walk2 附 walk1 定稿；其余姿态与全部部件附 idle 定稿（总 ≤3） */
+  function imagesFor(target) {
     const photos = state.refs.map((r) => r.dataURL);
-    if (pose === 'idle') return photos.slice(0, MAX_REFS);
-    const ref = pose === 'walk2' ? state.results.walk1?.image : state.results.idle?.image;
+    if (target === 'idle') return photos.slice(0, MAX_REFS);
+    const ref = (target === 'walk2' && state.results.walk1?.image) || state.results.idle?.image || null;
     const head = ref ? photos.slice(0, MAX_REFS - 1) : photos.slice(0, MAX_REFS);
     return ref ? [...head, ref] : head;
   }
 
-  async function callGenerate(pose) {
+  async function callGenerate(target) {
     const ctl = new AbortController();
     state.abortCtl = ctl;
     try {
       const res = await fetch(API.generate, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ pose, images: imagesFor(pose) }),
+        body: JSON.stringify({
+          ...(isPose(target) ? { pose: target } : { part: target }),
+          style: state.style,
+          images: imagesFor(target),
+        }),
         signal: ctl.signal,
       });
       const data = await res.json().catch(() => null);
@@ -279,8 +310,8 @@
     }
   }
 
-  function setCard(pose, status, errText) {
-    const card = el.grid.querySelector(`[data-pose="${pose}"]`);
+  function setCard(target, status, errText) {
+    const card = el.grid.querySelector(`[data-target="${CSS.escape(target)}"]`);
     if (!card) return;
     card.classList.remove('is-wait', 'is-gen', 'is-done', 'is-fail');
     card.classList.add(`is-${status}`);
@@ -288,76 +319,79 @@
     if (err) { err.querySelector('span').textContent = errText || '生成失败'; }
   }
 
-  function updateProgress(doneN, txt) {
-    el.barFill.style.width = `${Math.round((doneN / POSES.length) * 100)}%`;
+  function updateProgress(doneN, total, txt) {
+    el.barFill.style.width = `${Math.round((doneN / Math.max(1, total)) * 100)}%`;
     el.progressTxt.textContent = txt || '';
   }
 
   async function generate() {
-    if (!state.enabled || state.busy || !state.refs.length) return;
+    const targets = currentTargets();
+    if (!state.enabled || state.busy || !state.refs.length || !targets.length) return;
     state.busy = true; state.aborted = false;
-    state.results = {};
+    state.curTargets = targets;
+    // 只保留仍在本轮目标里的旧结果（换画风时已整体清空）
+    for (const k of Object.keys(state.results)) if (!targets.includes(k)) delete state.results[k];
     el.step3.hidden = true;
     el.go.disabled = true; el.cancel.hidden = false;
-    POSES.forEach((p) => setCard(p, 'wait'));
+    targets.forEach((t) => { if (!state.results[t]) setCard(t, 'wait'); });
     el.progress.hidden = false;
-    updateProgress(0, '排队中…');
+    const styleNote = STYLE_LABEL[state.style] || state.style;
+    const anchorNote = state.wantPoses ? '' : '（发呆 = 部件定稿锚点）';
+    updateProgress(0, targets.length, `排队中… · ${styleNote}${anchorNote}`);
 
     const t0 = Date.now();
-    for (let i = 0; i < POSES.length; i++) {
-      const pose = POSES[i];
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
       if (state.aborted) break;
-      setCard(pose, 'gen');
-      updateProgress(Object.keys(state.results).length,
-        `正在画 ${i + 1}/${POSES.length} · ${POSE_LABEL[pose]}${state.mock ? '' : '（每张约 10–60 秒）'}`);
+      if (state.results[target]) continue; // 已完成的跳过（重试轮次）
+      setCard(target, 'gen');
+      updateProgress(targets.filter((t) => state.results[t]).length, targets.length,
+        `正在画 ${i + 1}/${targets.length} · ${LABELS[target] || target}（${styleNote}）${state.mock ? '' : '，每件约 10–60 秒'}`);
       try {
-        const out = await callGenerate(pose);
-        state.results[pose] = out;
-        const card = el.grid.querySelector(`[data-pose="${pose}"] img`);
-        if (card) { card.src = out.image; card.alt = `${POSE_LABEL[pose]}生成结果`; }
-        setCard(pose, 'done');
+        const out = await callGenerate(target);
+        state.results[target] = out;
+        const img = el.grid.querySelector(`[data-target="${CSS.escape(target)}"] img`);
+        if (img) { img.src = out.image; img.alt = `${LABELS[target] || target}生成结果`; }
+        setCard(target, 'done');
       } catch (e) {
         if (state.aborted || e.name === 'AbortError') break;
-        setCard(pose, 'fail', e.message || String(e));
+        setCard(target, 'fail', e.message || String(e));
       }
-      updateProgress(Object.keys(state.results).length);
     }
 
-    const doneN = Object.keys(state.results).length;
+    const doneN = targets.filter((t) => state.results[t]).length;
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
     state.busy = false;
     el.cancel.hidden = true;
     syncGo();
     if (state.aborted) {
-      updateProgress(doneN, `已取消 · 完成 ${doneN}/${POSES.length}（可单张重试或整套重画）`);
-    } else if (doneN === POSES.length) {
-      updateProgress(doneN, `七种姿态全部画好 · 用时 ${secs}s`);
+      updateProgress(doneN, targets.length, `已取消 · 完成 ${doneN}/${targets.length}（可单张重试或整套重画）`);
+    } else if (doneN === targets.length) {
+      updateProgress(doneN, targets.length, `${targets.length} 件素材全部画好 · 用时 ${secs}s`);
       showResult();
     } else {
-      updateProgress(doneN, `完成 ${doneN}/${POSES.length} · 失败的姿态可点卡片上的「重试」`);
+      updateProgress(doneN, targets.length, `完成 ${doneN}/${targets.length} · 失败的卡片可点「重试」`);
     }
   }
 
-  async function retryPose(pose) {
+  async function retryTarget(target) {
     if (state.busy || !state.enabled) return;
-    if (pose !== 'idle' && !state.results.idle && pose !== 'walk1') {
-      /* 无定稿可参考也允许重试：imagesFor 自动退化为纯照片 */
-    }
     state.busy = true;
     syncGo();
-    setCard(pose, 'gen');
+    setCard(target, 'gen');
     try {
-      const out = await callGenerate(pose);
-      state.results[pose] = out;
-      const img = el.grid.querySelector(`[data-pose="${pose}"] img`);
+      const out = await callGenerate(target);
+      state.results[target] = out;
+      const img = el.grid.querySelector(`[data-target="${CSS.escape(target)}"] img`);
       if (img) img.src = out.image;
-      setCard(pose, 'done');
-      if (POSES.every((p) => state.results[p])) {
-        updateProgress(POSES.length, `七种姿态全部画好`);
+      setCard(target, 'done');
+      const targets = state.curTargets.length ? state.curTargets : currentTargets();
+      if (targets.length && targets.every((t) => state.results[t])) {
+        updateProgress(targets.length, targets.length, `${targets.length} 件素材全部画好`);
         showResult();
       }
     } catch (e) {
-      if (e.name !== 'AbortError') setCard(pose, 'fail', e.message || String(e));
+      if (e.name !== 'AbortError') setCard(target, 'fail', e.message || String(e));
     } finally {
       state.busy = false;
       syncGo();
@@ -457,39 +491,41 @@
     return slug || 'my-cat';
   }
 
-  function buildSkinJson(folder, extOfPose) {
-    const f = (pose) => `${pose}${extOfPose[pose]}`;
+  /** skin.json v2：按实际生成的姿态组装（缺帧状态由渲染层回落 idle；idle 必须存在） */
+  function buildSkinJson(extOf) {
+    const has = (t) => !!state.results[t];
+    const f = (t) => `${t}${extOf[t]}`;
+    const states = {};
+    states.idle = { frames: [f('idle')] };
+    if (has('walk1') && has('walk2')) {
+      states.walk = {
+        frames: [f('walk1'), f('walk2')],
+        anim: {
+          interval: [0.14, 0.22], refSpeed: 46, bobAmp: 3, swayAmp: 0.02, swayPhase: 1.57,
+          squashAmp: 0.012, crossfade: 0.3, entryT: 0.25, exitT: 0.18, stateXfade: 0.12,
+        },
+      };
+    }
+    if (has('sleep')) states.sleep = { frames: [f('sleep')] };
+    if (has('drag')) { states.drag = { frames: [f('drag')] }; states.thrown = { frames: [f('drag')] }; }
+    if (has('pet')) states.pet = { frames: [f('pet')] };
+    if (has('tap')) { states.groom = { frames: [f('tap')] }; states.tap = { frames: [f('tap')] }; }
+    const expressions = {};
+    if (has('pet')) expressions.happy = { frames: [f('pet')], once: true, fps: 6, hold: 0.6 };
+    if (has('drag')) expressions.surprise = { frames: [f('drag')], once: true, fps: 8, hold: 0.35 };
+    if (has('tap')) expressions.tap = { frames: [f('tap')], once: true, fps: 8, hold: 0.12 };
     return JSON.stringify({
       version: 2,
       name: `${(el.name.value || '').trim() || '我的猫'} · AI 定制`,
       fps: 8,
-      states: {
-        idle: { frames: [f('idle')] },
-        walk: {
-          frames: [f('walk1'), f('walk2')],
-          anim: {
-            interval: [0.14, 0.22], refSpeed: 46, bobAmp: 3, swayAmp: 0.02, swayPhase: 1.57,
-            squashAmp: 0.012, crossfade: 0.3, entryT: 0.25, exitT: 0.18, stateXfade: 0.12,
-          },
-        },
-        sleep: { frames: [f('sleep')] },
-        drag: { frames: [f('drag')] },
-        thrown: { frames: [f('drag')] },
-        pet: { frames: [f('pet')] },
-        groom: { frames: [f('tap')] },
-        tap: { frames: [f('tap')] },
-      },
-      expressions: {
-        happy: { frames: [f('pet')], once: true, fps: 6, hold: 0.6 },
-        surprise: { frames: [f('drag')], once: true, fps: 8, hold: 0.35 },
-        tap: { frames: [f('tap')], once: true, fps: 8, hold: 0.12 },
-      },
+      states,
+      expressions,
     }, null, 2);
   }
 
-  function buildReadme(folder) {
-    return [
-      `奶油猫 CreamCat · AI 定制皮肤「${(el.name.value || '').trim() || '我的猫'}」`,
+  function buildReadme(folder, partCount) {
+    const lines = [
+      `精力桌宠 CreamCat · AI 定制皮肤「${(el.name.value || '').trim() || '我的猫'}」`,
       '',
       '安装（约 1 分钟）：',
       `1. 把整个 ${folder} 文件夹放进皮肤目录：`,
@@ -499,24 +535,33 @@
       '2. 把同目录下原来的 default 文件夹改名为 .default（点开头会被忽略），新皮肤即生效。',
       '3. 桌宠约 1 秒内自动热重载；也可右键 →「重新加载皮肤」。',
       '',
-      '想换回内置奶油猫：把 .default 改回 default，删除或移走本文件夹即可。',
-      '',
-      '本皮肤由下载页「AI 毛发定制工坊」生成，素材仅保存在你的电脑上。',
-    ].join('\r\n');
+      '想换回内置精力桌宠：把 .default 改回 default，删除或移走本文件夹即可。',
+    ];
+    if (partCount > 0) {
+      lines.push(
+        '',
+        `parts/ 内为 ${partCount} 件 Live2D 式部件拆层稿（脸/头轮廓、左右眼、上下眉毛、嘴巴、`,
+        '双前爪、身体、尾巴、毛发遮挡层、眼睛高光/阴影层），与姿态帧同一画风、同一只猫。',
+        '桌宠 app 不直接消费 parts/，供分层动画制作与画师二创使用。'
+      );
+    }
+    lines.push('', '本皮肤由下载页「AI 毛发定制工坊」生成，素材仅保存在你的电脑上。');
+    return lines.join('\r\n');
   }
 
   async function downloadZip() {
-    if (!POSES.every((p) => state.results[p]?.image)) return;
+    if (!state.results.idle?.image) return; // idle 是皮肤必需的锚点
     const folder = skinFolderSlug();
-    const extOfPose = {};
+    const ext = {};
     const files = [];
-    for (const p of POSES) {
-      extOfPose[p] = extOf(state.results[p].image);
-      files.push({ path: `${folder}/${p}${extOfPose[p]}`, bytes: dataURLtoBytes(state.results[p].image) });
-    }
+    const poseTargets = POSES.filter((p) => state.results[p]?.image);
+    const partTargets = PART_IDS.filter((p) => state.results[p]?.image);
+    for (const t of [...poseTargets, ...partTargets]) ext[t] = extOf(state.results[t].image);
+    for (const p of poseTargets) files.push({ path: `${folder}/${p}${ext[p]}`, bytes: dataURLtoBytes(state.results[p].image) });
+    for (const p of partTargets) files.push({ path: `${folder}/parts/${p}${ext[p]}`, bytes: dataURLtoBytes(state.results[p].image) });
     const enc = new TextEncoder();
-    files.unshift({ path: `${folder}/skin.json`, bytes: enc.encode(buildSkinJson(folder, extOfPose)) });
-    files.push({ path: `${folder}/README.txt`, bytes: enc.encode(buildReadme(folder)) });
+    files.unshift({ path: `${folder}/skin.json`, bytes: enc.encode(buildSkinJson(ext)) });
+    files.push({ path: `${folder}/README.txt`, bytes: enc.encode(buildReadme(folder, partTargets.length)) });
     const blob = await zipFiles(files);
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -536,14 +581,14 @@
     el.step3.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  /* ─────────────── 姿态卡片 ─────────────── */
+  /* ─────────────── 目标卡片 ─────────────── */
 
-  function buildGrid() {
+  function buildGrid(targets) {
     el.grid.innerHTML = '';
-    for (const pose of POSES) {
+    for (const target of targets) {
       const card = document.createElement('figure');
-      card.className = 'stu-card is-wait';
-      card.dataset.pose = pose;
+      card.className = 'stu-card is-wait' + (!state.wantPoses && state.wantParts && target === 'idle' ? ' is-anchor' : '');
+      card.dataset.target = target;
       card.innerHTML =
         '<div class="stu-stage">' +
           '<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">' +
@@ -551,10 +596,23 @@
           '<span class="stu-spin"></span>' +
           '<span class="stu-err"><span>生成失败</span><button type="button">重试</button></span>' +
         '</div>' +
-        `<figcaption>${POSE_LABEL[pose]} <b class="mono">${pose}</b></figcaption>`;
-      card.querySelector('.stu-ph').textContent = POSE_LABEL[pose];
-      card.querySelector('.stu-err button').addEventListener('click', () => retryPose(pose));
+        `<figcaption>${LABELS[target] || target} <b class="mono">${target}</b></figcaption>`;
+      card.querySelector('.stu-ph').textContent = LABELS[target] || target;
+      card.querySelector('.stu-err button').addEventListener('click', () => retryTarget(target));
       el.grid.appendChild(card);
+    }
+    applyResultsToGrid();
+  }
+
+  /** 重建网格后把已有结果回填到卡片 */
+  function applyResultsToGrid() {
+    for (const [target, out] of Object.entries(state.results)) {
+      const card = el.grid.querySelector(`[data-target="${CSS.escape(target)}"]`);
+      if (!card || !out?.image) continue;
+      const img = card.querySelector('img');
+      img.src = out.image;
+      img.alt = `${LABELS[target] || target}生成结果`;
+      setCard(target, 'done');
     }
   }
 
@@ -562,7 +620,7 @@
 
   async function boot() {
     if (!el.grid) return; // 区块不存在（被裁剪的部署）直接退出
-    buildGrid();
+    buildGrid(currentTargets());
 
     // 上传交互
     el.drop.addEventListener('click', () => { if (state.enabled && !state.busy) el.file.click(); });
@@ -577,6 +635,39 @@
       if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
     });
 
+    // 画风切换：画风即角色定稿语境，切换后旧结果作废
+    for (const radio of document.querySelectorAll('input[name="stu-style"]')) {
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        state.style = radio.value;
+        if (Object.keys(state.results).length && !state.busy) {
+          state.results = {};
+          state.curTargets = [];
+          el.step3.hidden = true;
+          el.progress.hidden = true;
+          buildGrid(currentTargets());
+        }
+        syncGo();
+      });
+    }
+
+    // 输出内容勾选：重建卡片网格，丢弃不再需要的结果
+    const onOutputToggle = () => {
+      state.wantPoses = el.optPoses.checked;
+      state.wantParts = el.optParts.checked;
+      if (!state.busy) {
+        const targets = currentTargets();
+        for (const k of Object.keys(state.results)) if (!targets.includes(k)) delete state.results[k];
+        buildGrid(targets);
+        const complete = targets.length > 0 && targets.every((t) => state.results[t]);
+        el.step3.hidden = !complete;
+        if (complete) showResult();
+      }
+      syncGo();
+    };
+    el.optPoses.addEventListener('change', onOutputToggle);
+    el.optParts.addEventListener('change', onOutputToggle);
+
     // 生成 / 取消 / 重画 / 下载
     el.go.addEventListener('click', generate);
     el.cancel.addEventListener('click', () => {
@@ -588,6 +679,8 @@
     el.name.addEventListener('input', () => {
       if (!el.step3.hidden) showResult(); // 实时同步 zip 名/文件夹名
     });
+
+    syncGo();
 
     // 服务探测：静态托管 / file:// / 未配 key → 禁用态
     try {
@@ -604,9 +697,8 @@
       el.panel.classList.remove('is-off');
       el.off.hidden = true;
       if (state.mock) {
-        el.progressTxt.textContent = '';
         el.drop.querySelector('.stu-drop-sub').textContent =
-          '联调模式（CAT_SKIN_MOCK=1）：返回内置奶油猫素材，不调用真实 AI';
+          '联调模式（CAT_SKIN_MOCK=1）：返回内置精力桌宠素材，不调用真实 AI';
       }
       syncGo();
     } catch {
@@ -615,7 +707,7 @@
   }
 
   // 测试钩子（E2E harness 用；对普通访客无副作用）
-  window.__catStudio = { state, generate, retryPose, buildZip: downloadZip, addRef, POSES };
+  window.__catStudio = { state, generate, retryTarget, buildZip: downloadZip, addRef, currentTargets, POSES, PART_IDS };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

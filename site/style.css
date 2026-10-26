@@ -360,47 +360,26 @@ section[id], div[id="download"] { scroll-margin-top: 100px; }
 
 .sec-head { max-width: 660px; }
 .sec-head h2 {
-  margin: 15px 0 0;
+  margin: 0;
   font-size: clamp(26px, 3vw, 34px);
   line-height: 1.32;
   font-weight: 800;
   letter-spacing: -.015em;
   color: var(--green-deep);
 }
-.sec-head p { margin: 14px 0 0; font-size: 14.5px; line-height: 1.95; color: #5D695F; }
 
-/* ---------- catwalk strip ---------- */
-.catwalk { position: relative; margin-top: 44px; height: 148px; overflow: hidden; }
-.cw-ground {
-  position: absolute;
-  left: 0; right: 0; bottom: 22px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--line) 10%, var(--line) 90%, transparent);
+/* ---------- 24 帧视频步态环雪碧图（cat-walk-sheet.webp，竖排 24 帧 263×264/帧） ---------- */
+/* steps(24) 逐帧播放，1s 周期 = app 内 24fps 原速；--cw/--ch 按使用处尺寸内联设定 */
+.walksheet {
+  width: var(--cw);
+  height: var(--ch);
+  background-image: url(assets/poses/cat-walk-sheet.webp);
+  background-repeat: no-repeat;
+  background-size: var(--cw) calc(var(--ch) * 24);
+  animation: sheetgait 1s steps(24, end) infinite;
+  will-change: background-position;
 }
-.cw-cat {
-  position: absolute;
-  bottom: 23px;
-  left: 100%;
-  width: 128px;
-  animation: stroll 17s linear infinite;
-  will-change: left;
-}
-.cw-cat img { width: 100%; height: auto; display: block; }
-@keyframes stroll { from { left: 100%; } to { left: -150px; } }
-
-/* ---------- frame-swap helpers ---------- */
-.frames2, .frames3 { position: relative; display: grid; justify-items: center; align-items: end; }
-.frames2 img, .frames3 img { grid-area: 1 / 1; display: block; max-width: 100%; height: auto; opacity: 0; }
-@keyframes gA { 0%, 49.9% { opacity: 1 } 50%, 100% { opacity: 0 } }
-@keyframes gB { 0%, 49.9% { opacity: 0 } 50%, 100% { opacity: 1 } }
-.frames2 img:nth-child(1) { animation: gA .56s steps(1, end) infinite; }
-.frames2 img:nth-child(2) { animation: gB .56s steps(1, end) infinite; }
-@keyframes hA { 0%, 33.3% { opacity: 1 } 33.4%, 100% { opacity: 0 } }
-@keyframes hB { 0%, 33.3% { opacity: 0 } 33.4%, 66.6% { opacity: 1 } 66.7%, 100% { opacity: 0 } }
-@keyframes hC { 0%, 66.6% { opacity: 0 } 66.7%, 100% { opacity: 1 } }
-.frames3 img:nth-child(1) { animation: hA .66s steps(1, end) infinite; }
-.frames3 img:nth-child(2) { animation: hB .66s steps(1, end) infinite; }
-.frames3 img:nth-child(3) { animation: hC .66s steps(1, end) infinite; }
+@keyframes sheetgait { from { background-position: 0 0; } to { background-position: 0 calc(var(--ch) * -24); } }
 
 /* ---------- pose grid ---------- */
 .pose-grid { margin-top: 34px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
@@ -442,7 +421,7 @@ section[id], div[id="download"] { scroll-margin-top: 100px; }
   object-fit: contain;
   margin-bottom: 15px;
 }
-.pose-stage .frames2 { position: relative; z-index: 1; margin-bottom: 15px; max-height: 176px; }
+.pose-stage .walksheet { position: relative; z-index: 1; margin-bottom: 15px; }
 .pose-stage .fx-swing { position: relative; z-index: 1; margin-bottom: 15px; max-height: 176px; }
 .pose-stage .fx-swing img { margin-bottom: 0; }
 
@@ -463,8 +442,6 @@ section[id], div[id="download"] { scroll-margin-top: 100px; }
 @keyframes breathe { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.02) } }
 .fx-breathe { animation: breathe 3.4s ease-in-out infinite; transform-origin: 50% 100%; }
 .fx-breathe-slow { animation: breathe 5.2s ease-in-out infinite; transform-origin: 50% 100%; }
-@keyframes bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
-.fx-bob { animation: bob .56s ease-in-out infinite; }
 @keyframes swing { 0%, 100% { transform: rotate(4.5deg) } 50% { transform: rotate(-4.5deg) } }
 .fx-swing { animation: swing 2.6s ease-in-out infinite; transform-origin: 50% 4%; }
 @keyframes nuzzle { 0%, 100% { transform: rotate(0) } 30% { transform: rotate(-2.6deg) } 65% { transform: rotate(2.2deg) } }
@@ -517,77 +494,24 @@ section[id], div[id="download"] { scroll-margin-top: 100px; }
 .fx-steps i:nth-child(3) { animation-delay: .56s; }
 @keyframes stepline { 0%, 100% { opacity: .16 } 20% { opacity: .75 } }
 
-/* ---------- features ---------- */
-.feat-grid { margin-top: 40px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.feat-card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--r-card);
-  padding: 22px 20px 20px;
-  transition: transform .25s, box-shadow .25s, border-color .25s;
-}
-.feat-card:hover {
-  transform: translateY(-3px);
-  border-color: #D3CEBC;
-  box-shadow: 0 20px 44px -32px rgba(30, 61, 47, .55);
-}
-.feat-ico {
-  width: 42px; height: 42px;
-  border-radius: 13px;
-  background: var(--mint-soft);
-  color: var(--green);
-  display: grid;
-  place-items: center;
-}
-.feat-ico svg { width: 21px; height: 21px; }
-.feat-card h3 { margin: 15px 0 0; font-size: 14.8px; font-weight: 700; color: var(--ink); letter-spacing: .01em; }
-.feat-card p { margin: 8px 0 0; font-size: 12.8px; line-height: 1.85; color: var(--muted); }
-
-.feats-cta { margin-top: 42px; display: flex; align-items: center; justify-content: center; gap: 18px; flex-wrap: wrap; }
-.btn-down {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  background: var(--green-deep);
-  color: #F8F6EE;
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: .02em;
-  padding: 13px 27px;
-  border-radius: 999px;
-  box-shadow: 0 16px 32px -18px rgba(30, 61, 47, .65);
-  transition: background .22s, transform .22s;
-}
-.btn-down:hover { background: var(--green-hi); transform: translateY(-1px); }
-.btn-down svg { width: 14px; height: 14px; }
-.feats-cta-note { font-size: 12.5px; color: var(--faint); letter-spacing: .02em; }
-
 /* ---------- responsive (new sections) ---------- */
 @media (max-width: 1000px) {
   .pose-grid { grid-template-columns: repeat(2, 1fr); }
-  .feat-grid { grid-template-columns: repeat(2, 1fr); }
   .topnav { gap: 18px; margin-right: 22px; }
 }
 @media (max-width: 640px) {
   .topnav a:not(.nav-cta) { display: none; }
   .topnav { margin-right: 16px; }
   .section { padding-top: 62px; }
-  .catwalk { height: 118px; margin-top: 32px; }
-  .cw-cat { width: 104px; }
   .pose-grid { grid-template-columns: 1fr; gap: 14px; }
   .pose-stage { height: 196px; }
-  .feat-grid { grid-template-columns: 1fr; }
-  .sec-head p { font-size: 13.5px; }
 }
 
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .cw-cat, .fx-breathe, .fx-breathe-slow, .fx-bob, .fx-swing, .fx-nuzzle,
+  .fx-breathe, .fx-breathe-slow, .fx-swing, .fx-nuzzle,
   .fx-beat, .fx-zzz b, .fx-hearts svg, .fx-notes svg, .fx-steps i,
-  .frames2 img, .frames3 img { animation: none !important; }
-  .cw-cat { left: 34%; }
-  .frames2 img:nth-child(1), .frames3 img:nth-child(1) { opacity: 1 !important; }
-  .frames2 img:nth-child(n+2), .frames3 img:nth-child(n+2) { opacity: 0 !important; }
+  .walksheet { animation: none !important; } /* 雪碧图静止在第 1 帧（background-position 0 0） */
   .fx-zzz b, .fx-hearts svg, .fx-notes svg { opacity: .7 !important; }
 }
 
@@ -1169,4 +1093,63 @@ section[id], div[id="download"] { scroll-margin-top: 100px; }
 @media (prefers-reduced-motion: reduce) {
   .stu-spin { animation-duration: 2.4s; }
   .stu-bar i { transition: none; }
+}
+
+/* ── 毛发定制工坊：画风 / 输出选项（stu-opts） ── */
+.stu-opts {
+  display: flex;
+  gap: 14px 34px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.stu-opt-g { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.stu-opt-h {
+  align-self: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--faint);
+  flex: 0 0 auto;
+  margin-right: 2px;
+}
+.stu-opt {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 15px 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-item);
+  background: #FDFBF5;
+  cursor: pointer;
+  transition: border-color .18s, background .18s, box-shadow .18s;
+  max-width: 320px;
+}
+.stu-opt:hover { border-color: #D3CEBC; }
+.stu-opt input { margin: 4px 0 0; accent-color: var(--green-hi); flex: 0 0 auto; }
+.stu-opt > span { display: flex; flex-direction: column; line-height: 1.4; font-size: 13px; font-weight: 600; color: var(--ink); }
+.stu-opt i { font-style: normal; font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 3px; line-height: 1.55; }
+.stu-opt:has(input:checked) {
+  border-color: var(--green-hi);
+  background: var(--mint-soft);
+  box-shadow: 0 0 0 2px rgba(174, 199, 166, .3);
+}
+/* 部件定稿锚点卡（仅部件模式下的 idle） */
+.stu-card.is-anchor figcaption::after {
+  content: "定稿锚点";
+  font-size: 9px;
+  color: var(--green);
+  background: var(--mint-soft);
+  border: 1px solid #DCE1CE;
+  border-radius: 999px;
+  padding: 0 6px;
+  margin-left: 5px;
+  font-weight: 600;
+}
+@media (max-width: 1000px) {
+  .stu-opts { flex-direction: column; gap: 12px; }
+}
+@media (max-width: 640px) {
+  .stu-opt { max-width: 100%; flex: 1 1 100%; }
+  .stu-opt-h { flex-basis: 100%; }
 }
