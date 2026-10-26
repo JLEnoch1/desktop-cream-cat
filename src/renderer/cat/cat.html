@@ -5,6 +5,10 @@
     <link rel="stylesheet" href="cat.css" />
   </head>
   <body>
+    <!-- 精力值胶囊：绑定在桌宠下方，鼠标悬浮时显示（DOM 在 canvas 之前 → 猫脚压在胶囊前，像站在牌子上） -->
+    <div id="energy-pill" aria-hidden="true">
+      <span class="ep-bolt">⚡</span><span id="ep-num">7.0</span><span class="ep-sep">·</span><span id="ep-tier">平稳</span>
+    </div>
     <canvas id="stage"></canvas>
     <div id="bubble"></div>
     <script src="cat.js"></script>

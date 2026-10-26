@@ -12,6 +12,52 @@ body {
 
 #stage {
   display: block;
+  /* 画布叠在精力胶囊之上：猫脚压住胶囊顶缘，像站在名牌前 */
+  position: relative;
+}
+
+/* ── 精力值胶囊：绑定在桌宠下方（窗口底部预留 38px 条带），悬浮显示 ── */
+#energy-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  transform: translateX(-50%) translateY(4px);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 13px;
+  background: #fffdf8;
+  border: 2.5px solid #20242a;
+  border-radius: 999px;
+  box-shadow: 3px 3px 0 rgba(32, 36, 42, 0.14);
+  font: 800 13px/1 ui-rounded, 'PingFang SC', system-ui, sans-serif;
+  color: #20242a;
+  white-space: nowrap;
+  pointer-events: none; /* 纯展示：不进命中区，不吃点击 */
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+#energy-pill.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+#energy-pill .ep-bolt {
+  font-size: 11px;
+}
+
+#energy-pill .ep-sep {
+  opacity: 0.45;
+  font-weight: 600;
+}
+
+#ep-tier {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.75;
 }
 
 #bubble {

@@ -15,6 +15,7 @@ import { createSpriteSkin, type SpriteSkin, type SkinAssetsV2 } from './sprite-s
 import { drawFallbackCat } from './fallback-cat.js';
 import { computeMoodParams, reactionFor, petLines, greetingLine, idleLine, NEUTRAL_MOOD, type MoodParams } from './mood.js';
 import { pulseIntensity } from '../../emotion/pulse-contract.js';
+import { tierFor } from '../../emotion/engine.js';
 
 declare global {
   interface Window {
@@ -26,6 +27,9 @@ declare global {
 const canvas = document.getElementById('stage') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
 const bubbleEl = document.getElementById('bubble') as HTMLDivElement;
+const pillEl = document.getElementById('energy-pill') as HTMLDivElement;
+const pillNum = document.getElementById('ep-num') as HTMLSpanElement;
+const pillTier = document.getElementById('ep-tier') as HTMLSpanElement;
 document.addEventListener('dragstart', (e) => e.preventDefault());
 
 let DPR = 1;
@@ -49,6 +53,31 @@ function bubble(text: string, ms = 1600): void {
   if (bubbleTimer) clearTimeout(bubbleTimer);
   bubbleTimer = setTimeout(() => bubbleEl.classList.remove('show'), ms);
 }
+
+/* ─────────────────────────── 精力值胶囊（绑定桌宠下方，悬浮显示） ─────────────────────────── */
+
+let pillHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 鼠标悬浮到猫身上 → 显示精力值；离开/静止 1.2s 后自动收起 */
+function showPill(): void {
+  pillEl.classList.add('show');
+  if (pillHideTimer) clearTimeout(pillHideTimer);
+  pillHideTimer = setTimeout(() => pillEl.classList.remove('show'), 1200);
+}
+
+function updatePill(): void {
+  if (!mood) return;
+  pillNum.textContent = mood.energy.toFixed(1);
+  pillTier.textContent = tierFor(mood.energy).label;
+}
+
+// 命中区轮询保证光标在猫身上时窗口可交互 → mousemove 即悬浮信号；
+// 光标离开热区后主进程切回穿透，事件流停止，靠定时器收起。
+window.addEventListener('mousemove', showPill);
+window.addEventListener('mouseleave', () => {
+  if (pillHideTimer) clearTimeout(pillHideTimer);
+  pillEl.classList.remove('show');
+});
 
 /* ─────────────────────────── 心情层 ─────────────────────────── */
 
@@ -98,6 +127,7 @@ window.cat.onMood((m) => {
   mood = m;
   moodParams = computeMoodParams(m);
   applyMoodToSkin();
+  updatePill(); // 悬浮胶囊的数值/档位随心情推送实时刷新
   if (!greeted) {
     greeted = true;
     setTimeout(() => bubble(greetingLine(m), 3200), 1400);

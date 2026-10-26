@@ -619,24 +619,26 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   height: 0;
 }
 
+/* 精力清单 chip：纯文字胶囊（无图标、无默认值徽标；用户裁决 2026-10-26）。
+   宽度随名称自适应，环形定位靠 transform 末端 translate(-50%,-50%) 居中到扇区落点。 */
 .rp-ring .rp-chip {
   position: absolute;
-  left: -31px;
-  top: -31px;
-  width: 62px;
-  height: 62px;
-  border-radius: 50%;
+  left: 0;
+  top: 0;
+  min-width: 62px;
+  max-width: 130px;
+  height: 38px;
+  padding: 0 15px;
+  border-radius: 999px;
   background: var(--card);
   border: 2.5px solid var(--stroke);
   box-shadow: var(--hard), 0 10px 22px rgba(23, 37, 29, .18);
   cursor: pointer;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
   /* 收起态：贴回圆心 + 缩小（弹出动画的起点） */
-  transform: rotate(var(--ang)) translateY(0) rotate(calc(-1 * var(--ang))) scale(.2);
+  transform: rotate(var(--ang)) translateY(0) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(.2);
   opacity: 0;
   pointer-events: none;
   transition:
@@ -647,48 +649,31 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
 }
 /* 展开态：落到环上、正向、可点 */
 #recovery-pop.show .rp-ring .rp-chip {
-  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) scale(1);
+  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(1);
   opacity: 1;
   pointer-events: auto;
   /* 逐项 stagger：从中间往两侧展开，像扑克牌甩出 */
   transition-delay: calc(var(--i) * 26ms);
 }
 .rp-ring .rp-chip:hover {
-  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) scale(1.12);
+  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(1.12);
   box-shadow: 5px 5px 0 rgba(32, 36, 42, .14), 0 12px 26px rgba(23, 37, 29, .22);
   transition-delay: 0s;
   z-index: 2;
 }
 .rp-ring .rp-chip:active {
-  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) scale(.94);
+  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(.94);
   transition-delay: 0s;
 }
-.rp-chip .ico { font-size: 21px; line-height: 1; }
-/* 名称：贴在 chip 内底部（外挂名称会被相邻 chip 压住） */
+/* 名称：chip 唯一内容，文字加大保证可读 */
 .rp-chip .nm {
-  font-size: 9px;
+  font-size: 12.5px;
   font-weight: 700;
   color: var(--ink);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   line-height: 1;
-}
-/* 默认值徽标：右上角小胶囊，一眼看出这项恢复多少精力 */
-.rp-chip .dt {
-  position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 22px;
-  height: 17px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--green);
-  border: 1.5px solid var(--stroke);
-  color: var(--card);
-  font-size: 9.5px;
-  font-weight: 800;
-  line-height: 14px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
 }
 
 /* 中央收起钮（静态 chip，不带扇形变换） */
@@ -1018,7 +1003,7 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   #slide-card, #duration-card, #adjust-card, #panel { bottom: 66px; }
   #rec-stack { bottom: 70px; }
   #recovery-pop { --r: 96px; }
-  .rp-ring .rp-chip { width: 54px; height: 54px; left: -27px; top: -27px; }
-  .rp-chip .ico { font-size: 19px; }
+  .rp-ring .rp-chip { min-width: 52px; max-width: 120px; height: 32px; padding: 0 11px; }
+  .rp-chip .nm { font-size: 11.5px; }
   .rp-hint { bottom: 58px; }
 }

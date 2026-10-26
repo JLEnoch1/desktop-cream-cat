@@ -583,7 +583,7 @@ function enterAdjusting(w: AdjustWindow): void {
   adjustCountdown = setInterval(renderAdjustCountdown, 250);
   hudSlider.value = String(w.draftEnergy);
   renderHud(w.draftEnergy);
-  hud.classList.add('show'); // HUD 常驻可见（双保险）
+  hud.classList.add('show'); // 调节窗期间 HUD 出现（草稿滑条+角标）；exitAdjust 收起
   toast(`完成了「${w.label}」～ 7 秒内可微调精力`, 3200);
   // HUD 变为可交互（进度条现在写入草稿），同步纳入热区
   reportHotRects();
@@ -627,6 +627,8 @@ function exitAdjust(): void {
   hudPreviewing = false;
   // HUD 恢复显示真实精力（草稿从未落库，energy 一直是真值；滑动预览中则不打断）
   if (state && !slidePreviewActive) restoreHudFromState();
+  // 调节窗结束：HUD 收起（精力值常驻展示位在桌宠下方的悬浮胶囊）
+  hud.classList.remove('show');
   // 弹窗关闭：同步回收命中区
   reportHotRects();
 }
@@ -784,12 +786,9 @@ function renderRecoveries(items: RecoveryItem[]): void {
     chip.className = 'rp-chip';
     chip.style.setProperty('--ang', `${ang.toFixed(2)}deg`);
     chip.style.setProperty('--i', String(Math.round(order * 2)));
-    chip.title = `${item.name} · 约 ${item.minutes} 分钟 · 长按查看默认值历史`;
-    chip.innerHTML = `
-      <span class="ico">${item.icon}</span>
-      <span class="nm">${escapeHtml(item.name)}</span>
-      <span class="dt">${fmtDelta(item.currentDelta)}</span>
-    `;
+    chip.title = `${item.name} · 约 ${item.minutes} 分钟`;
+    // 精力清单只要文字：不带图标、不带默认值徽标（用户裁决 2026-10-26）
+    chip.innerHTML = `<span class="nm">${escapeHtml(item.name)}</span>`;
     chip.addEventListener('click', () => {
       // 选中即按默认值恢复精力：收起菜单，直接进入事件后调节窗口（7s 微调 → 确认弹窗）
       closeRecoveryPop();
@@ -1200,7 +1199,8 @@ function applyState(s: AppState): void {
 
 function boot(): void {
   initHudCells();
-  hud.classList.add('show'); // HUD 常驻（窗口自身由主进程按需 show/hide）
+  // HUD 不再常驻：精力值已移到桌宠下方的悬浮胶囊（catWin）。
+  // uiWin 的 HUD 仅在事件后调节窗期间出现（草稿滑条 + 倒计时角标）。
   syncRingCenter();
   paintRange(sSlider);
   paintRange(aSlider);

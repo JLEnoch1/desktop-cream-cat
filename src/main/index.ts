@@ -54,9 +54,9 @@ function logCrash(tag: string, detail: unknown): void {
 
 /* ─────────────────────────── 常量 ─────────────────────────── */
 
-/** 猫窗口尺寸（与 renderer/cat 的 W/H 常量一致） */
+/** 猫窗口尺寸（与 renderer/cat 的 W/H 常量一致；底部含 38px 精力值胶囊条） */
 const CAT_W = 360;
-const CAT_H = 380;
+const CAT_H = 412;
 /** UI 窗口尺寸：卡片区 + 底部 HUD */
 const UI_W = 400;
 const UI_H = 620;
@@ -284,7 +284,8 @@ let catDragLastAt = 0;
 const DRAG_STALE_MS = 8000;
 let hitTimer: ReturnType<typeof setInterval> | null = null;
 
-/** 猫体默认命中区：窗口底部居中（CX=180，GROUND=374，猫高约 250） */
+/** 猫体默认命中区：窗口底部居中（CX=180，脚底线 GROUND=374，猫高约 250；
+ *  底部 38px 精力值胶囊条是纯展示层，不进命中区） */
 const CAT_DEFAULT_RECT: HotRect = { x: 92, y: 110, w: 176, h: 264 };
 
 function setUiIgnore(ignore: boolean): void {
@@ -879,10 +880,15 @@ function setupSelfcheck(): void {
   catWin.webContents.once('did-finish-load', () => {
     setTimeout(async () => {
       try {
-        // 猫窗口体检：皮肤是否加载成功（false = 回退程序化猫）+ FSM 状态
+        // 猫窗口体检：皮肤加载（false = 回退程序化猫）+ FSM 状态 + 精力胶囊
+        // （模拟一次悬浮 mousemove → 胶囊应显示；截图时保持可见以便验收）
         const catInfo = await catWin!.webContents.executeJavaScript(
-          'JSON.stringify({ skin: !!(window.petDebug && window.petDebug.exprLoaded && window.petDebug.exprLoaded()),'
-          + ' state: window.petDebug ? window.petDebug.state() : null })',
+          'window.dispatchEvent(new MouseEvent("mousemove", { clientX: 180, clientY: 300, bubbles: true }));'
+          + 'JSON.stringify({ skin: !!(window.petDebug && window.petDebug.exprLoaded && window.petDebug.exprLoaded()),'
+          + ' state: window.petDebug ? window.petDebug.state() : null,'
+          + ' pill: (document.getElementById("ep-num") || {}).textContent,'
+          + ' pillTier: (document.getElementById("ep-tier") || {}).textContent,'
+          + ' pillShown: !!(document.getElementById("energy-pill") || { classList: { contains() { return false; } } }).classList.contains("show") })',
         );
         console.log(`[selfcheck] cat info=${catInfo}`);
         const image = await catWin!.webContents.capturePage();
