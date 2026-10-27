@@ -37,7 +37,7 @@ CAT_SKIN_MOCK=1 npm run site:dev
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `DASHSCOPE_API_KEY` | （空） | 百炼 API Key；空则可由页面「配置 API Key」面板运行时注入（见下），两者皆无时接口 503 NotConfigured |
-| `CAT_SKIN_MODEL` | `qwen-image-2.0-pro` | 图像编辑模型；旧 key 可改 `qwen-image-edit`（面板高级选项也可改） |
+| `CAT_SKIN_MODEL` | `qwen-image-2.0-pro` | 图像编辑模型（当前推荐）；可改 `qwen-image-2.0`；`qwen-image-edit` 为早期模型可能需单独开通（面板高级选项也可改） |
 | `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com` | 业务空间专属域名 / 新加坡地域时覆盖（面板高级选项也可改） |
 | `CAT_SKIN_MOCK` | （空） | `=1` 开联调模式 |
 
@@ -83,7 +83,7 @@ CAT_SKIN_MOCK=1 npm run site:dev
 | 非 JSON（HTML 404/405 等） | ✗ 拒绝 | 服务地址不是百炼（如内网 Anthropic 文本网关 `ai-gateway…/ai-llm/anthropic`） |
 | 401 / `InvalidApiKey` / `Unauthorized` | ✗ 拒绝 | Key 无效 |
 | 403 / `*Forbidden*` / `AccessDenied` / `Arrearage` | ✗ 拒绝 | Key 有效但无权访问该图像模型（多为文本 Key、未开通千问图像编辑、非该业务空间） |
-| `Model*NotFound` | ✗ 拒绝 | 模型名错（图像编辑用 `qwen-image-edit`） |
+| `Model*NotFound` | ✗ 拒绝 | 模型名错（图像编辑用 `qwen-image-2.0-pro`，留空即默认） |
 | 其它未知错误码 | ✗ 拒绝 | 保守兜底，透传原始 code/message |
 | `InvalidParameter` / 2xx | ✓ 通过 | 鉴权+端点+模型均 OK |
 
@@ -222,4 +222,5 @@ my-cat/               ← 文件夹名 = 猫咪名字 slug（非 ASCII 名回落
 - 回归全绿：mock E2E（styleFixed=pixel、noStyleRadio、19/19、zip 611967B、零错）+
   Key 面板（假 key 拒、file:// 隐藏、NO-ERRORS）+ 整页 shot（imgTotal 27、broken 0、
   NO-CONSOLE-ERRORS）+ 几何（optPills 3、19 卡等宽、双端 0 溢出）。
-- 真图像 API 全链路仍需用户在百炼开通 qwen-image-edit 的有效 Key 实测（本机无可用图像 Key）。
+- 真图像 API 全链路仍需用户以有权访问 `qwen-image-2.0-pro` 的百炼 Key 实测（`qwen-image-edit`
+  为早期模型，用户账号实测 `AUTH_RESOURCE_FORBIDDEN`；文档现推荐 qwen-image-2.0 系列）。

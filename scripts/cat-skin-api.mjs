@@ -24,7 +24,7 @@
  *
  * 环境变量：
  *  - DASHSCOPE_API_KEY    百炼 API Key（必配，否则接口返回 503 NotConfigured）
- *  - CAT_SKIN_MODEL       模型名，默认 qwen-image-2.0-pro（旧 key 可改 qwen-image-edit）
+ *  - CAT_SKIN_MODEL       模型名，默认 qwen-image-2.0-pro（当前图像编辑推荐；qwen-image-edit 为早期模型）
  *  - DASHSCOPE_BASE_URL   默认 https://dashscope.aliyuncs.com（业务空间专属域名/新加坡地域可覆盖）
  *  - CAT_SKIN_MOCK=1      联调模式：不调真 API，返回 site/assets/poses/*.webp 内置素材
  *                         （仅供开发/测试走通全链路，产品上无 key 即禁用）
@@ -251,7 +251,7 @@ async function dashscopeEdit(images, prompt, style) {
   try { data = await res.json() } catch { data = null }
   if (!res.ok || !data || data.code) {
     const code = data?.code || `HTTP${res.status}`
-    const message = data?.message || `DashScope 返回 ${res.status}${data ? '' : '（非百炼 JSON 响应：请检查「高级选项」服务地址是否为 https://dashscope.aliyuncs.com、模型名是否为图像编辑模型如 qwen-image-edit——文本/Anthropic 网关不适用）'}`
+    const message = data?.message || `DashScope 返回 ${res.status}${data ? '' : '（非百炼 JSON 响应：请检查「高级选项」服务地址是否为 https://dashscope.aliyuncs.com、模型名是否为图像编辑模型如 qwen-image-2.0-pro——文本/Anthropic 网关不适用）'}`
     throw Object.assign(new Error(message), { code })
   }
   const imgUrl = data?.output?.choices?.[0]?.message?.content?.find((c) => c && c.image)?.image
@@ -334,7 +334,7 @@ async function probeKey(key, model, baseUrl) {
       valid: false, code: code || `HTTP${res.status}`, ms,
       message: arrears
         ? `${raw || code}——账户欠费/未开通，请在百炼控制台充值或开通后重试`
-        : `${raw || code}——Key 被识别但无权访问该模型/资源。请在百炼控制台开通「千问图像编辑(qwen-image-edit)」模型、并确认此 Key 属于开通了图像生成的业务空间；文本模型 Key 不能用于本功能`,
+        : `${raw || code}——Key 被识别但无权访问该模型/资源。图像编辑当前模型为 qwen-image-2.0-pro（默认，模型名请留空）；qwen-image-edit 为早期模型、可能需单独开通。请到百炼控制台「模型广场」搜 qwen-image 确认已开通，子业务空间需管理员授权模型权限；北京/新加坡地域 Key 不可混用`,
     };
   }
   // 3) Key 无效 / 鉴权失败
@@ -343,7 +343,7 @@ async function probeKey(key, model, baseUrl) {
   }
   // 4) 模型不存在 / 名称错
   if (/Model\.?NotFound|ModelNotFound|InvalidModel/i.test(code)) {
-    return { valid: false, code, ms, message: `${raw || code}——模型名可能不对，图像编辑请用 qwen-image-edit（或 qwen-image-2.0-pro）` };
+    return { valid: false, code, ms, message: `${raw || code}——模型名可能不对，图像编辑请用 qwen-image-2.0-pro（推荐，留空即默认）或 qwen-image-2.0；qwen-image-edit 为早期模型` };
   }
   // 5) 走到参数校验层（空 messages 被拒）或 2xx → 鉴权+端点+模型全部 OK
   if (res.ok || /InvalidParameter|BadRequest\.?Input|MissingParameter|InvalidRequest/i.test(code)) {
