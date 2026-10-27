@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>下载 精力桌宠 · CreamCat</title>
-<meta name="description" content="精力桌宠 CreamCat 下载——精力桌宠。姿态图鉴、精力清单卡片与自定义猫皮肤工坊。Windows 与 macOS 同一个通用版本，无需注册，安装后自动启动。">
+<meta name="description" content="精力桌宠 CreamCat 下载——精力桌宠。姿态图鉴与精力清单卡片。Windows 与 macOS 同一个通用版本，无需注册，安装后自动启动。">
 <meta name="theme-color" content="#F6F3ED">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
@@ -31,7 +31,9 @@
     <nav class="topnav">
       <a href="#poses">姿态</a>
       <a href="#ui">精力清单</a>
+      <!-- release/v2.0.0 暂关「自定义猫」：导航入口注释停用（恢复 = 取消本处 + 下方 #studio 板块 + 文件尾 cat-studio.js 三处注释）
       <a href="#studio">自定义猫</a>
+      -->
       <a href="#download" class="nav-cta">下载</a>
     </nav>
     <div class="topmeta">
@@ -341,6 +343,7 @@
   </section>
 
   <!-- ═══════════ AI 毛发定制工坊 ═══════════ -->
+  <!-- release/v2.0.0 暂关「自定义猫」（AI 毛发定制工坊）：整段注释停用；前端代码与后端 scripts/cat-skin-api.mjs 均原样保留，随时可恢复
   <section class="section studio" id="studio">
     <div class="sec-head">
       <h2>自定义猫</h2>
@@ -460,6 +463,7 @@
 
     </div>
   </section>
+  -->
 
 </main>
 
@@ -470,6 +474,8 @@
   </div>
 </footer>
 
+<!-- release/v2.0.0 暂关「自定义猫」：cat-studio.js 停止加载（前端不再请求 /api/cat-skin/*）
 <script src="cat-studio.js" defer></script>
+-->
 </body>
 </html>
