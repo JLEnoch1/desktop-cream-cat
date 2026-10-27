@@ -36,10 +36,13 @@ CAT_SKIN_MOCK=1 npm run site:dev
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `DASHSCOPE_API_KEY` | （空） | 百炼 API Key；空则接口返回 503 NotConfigured，前端禁用 |
-| `CAT_SKIN_MODEL` | `qwen-image-2.0-pro` | 图像编辑模型；旧 key 可改 `qwen-image-edit` |
-| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com` | 业务空间专属域名 / 新加坡地域时覆盖 |
+| `DASHSCOPE_API_KEY` | （空） | 百炼 API Key；空则可由页面「配置 API Key」面板运行时注入（见下），两者皆无时接口 503 NotConfigured |
+| `CAT_SKIN_MODEL` | `qwen-image-2.0-pro` | 图像编辑模型；旧 key 可改 `qwen-image-edit`（面板高级选项也可改） |
+| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com` | 业务空间专属域名 / 新加坡地域时覆盖（面板高级选项也可改） |
 | `CAT_SKIN_MOCK` | （空） | `=1` 开联调模式 |
+
+环境变量与页面注入的优先级：**env > 运行时注入**。运行时 Key 只存服务进程内存
+（`runtimeCfg`），不写盘、日志只打尾号 4 位、服务重启即失效。
 
 ## HTTP 接口
 
@@ -47,6 +50,7 @@ CAT_SKIN_MOCK=1 npm run site:dev
 
 ```json
 { "ok": true, "enabled": true, "mock": false, "model": "qwen-image-2.0-pro",
+  "keySource": "env|runtime|null",
   "poses": ["idle", "..."], "parts": [{ "id": "face", "label": "脸/头轮廓" }, "..."],
   "styles": ["chibi", "flat", "pixel"] }
 ```
@@ -61,8 +65,33 @@ CAT_SKIN_MOCK=1 npm run site:dev
 失败：`{ "ok": false, "target": "...", "code": "InvalidApiKey|BadTarget|BadStyle|...", "message": "..." }`（HTTP 502/503/400）
 
 服务端把 DashScope 产物 URL（仅 24h 有效、OSS 跨域）**代下载转成 dataURL** 再回给浏览器；
-进程内串行队列保证同一时刻只有一发 DashScope 调用。key 只存在于服务端进程环境，
-页面永不接触。服务端不落地任何图片（无状态）。
+进程内串行队列保证同一时刻只有一发 DashScope 调用。Key 全程不出本机（页面 → 127.0.0.1
+本地服务 → 百炼），服务端不落地任何图片（无状态）。
+
+### `POST /api/cat-skin/check` / `POST /api/cat-skin/config`
+
+页面「配置百炼 API Key」面板的后端。请求：`{ "key": "sk-…", "model"?: "…", "baseUrl"?: "https://…" }`；
+`config` 另支持 `{ "key": null }` 清除运行时 Key。
+
+**零成本探针**：两个路由都用「空 messages」打一发 multimodal-generation——Key 无效 →
+鉴权层拒（401/InvalidApiKey）→ 接口 400 拒绝；Key 有效 → 进到参数校验层报错（**不会真正
+生成、不计费**）→ 通过。账户级告警（如欠费）以 `warning` 字段透传展示。网络不通 →
+`ProbeFailed`，Key 不保存。
+
+- `check`：只测试（面板「测试连接」按钮），不保存；返回 `{ ok, valid, ms, warning? }`。
+- `config`：探针通过后把 `{key, model, baseUrl}` 存入进程内存并翻转 `enabled`；
+  返回 `{ ok, saved, keySource, enabled, warning? }`。
+- 格式防线：Key 必须 `sk-` 开头（`KEY_RE`，格式错不打网络直接 400 BadKeyFormat）；
+  model 限 `[\w.-]{1,64}`；baseUrl 必须合法 http(s) 地址；请求体上限 16KB。
+
+### 前端 Key 面板行为
+
+- `status.enabled:false` 且**本地服务在线** → 显示面板（`#stu-key`，位于 `.stu-step` 之外，
+  不受 `is-off` 置灰影响）；`fetch` 都失败（file:///纯静态）→ 仍显示旧「未接入」横幅、面板隐藏。
+- 「测试连接」= `check`；「保存并启用」= `config`（输入框回车同保存）。失败原因红字回显。
+- 「记住在本浏览器」勾选 → Key 存 `localStorage['creamcat.studio.cfg']`，下次打开若服务
+  未配置则**静默自动注入**（失败自动清除并提示重填）；不勾则服务重启后需重填。
+- 运行时 Key 生效期间显示绿色 `#stu-keynote`（含「清除 Key」按钮 → `config {key:null}`）。
 
 ## 生成策略（路线 B：定稿 → 批量派生，锁角色一致性）
 
@@ -139,7 +168,7 @@ my-cat/               ← 文件夹名 = 猫咪名字 slug（非 ASCII 名回落
 
 一轮（七姿态）：
 - `node --check` 三文件通过；mock 模式 curl `status`/`generate` 七姿态全通。
-- Electron harness（`site-shots/studio-e2e.cjs`）走完整流程：注入参考图 → 生成 →
+- Electron harness（`scripts/site-verify/studio-e2e.cjs`）走完整流程：注入参考图 → 生成 →
   zip 下载 → `unzip` 校验（文件清单 + skin.json 可解析 + 图片可解码）→ 各步截图。
 - 无 key：status `enabled:false` → 页面禁用横幅；`file://` 打开：探测失败 → 同禁用态，无未捕获异常。
 
@@ -152,5 +181,16 @@ my-cat/               ← 文件夹名 = 猫咪名字 slug（非 ASCII 名回落
   19 卡回等待、step3 收起**；主流程零 console 错误。
   期间抓到一个真 bug：`downloadZip` 局部变量 `extOf` 遮蔽同名函数导致打包抛错（已修复并回归）。
 - 几何审计：opts 行 5 枚药丸、选中态描边 `rgb(56,113,79)`（`:has` 生效）、19 卡等宽 3 行、
-  移动端 0 溢出；`shot.cjs` 整页回归 NO-CONSOLE-ERRORS（imgTotal 27、broken 0）。
+  移动端 0 溢出；`scripts/site-verify/shot.cjs` 整页回归 NO-CONSOLE-ERRORS（imgTotal 27、broken 0）。
 - 真实 DashScope 链路仍需有效 key 联调（本机未配置；假 key 验证过错误透传 `InvalidApiKey` 502）。
+
+三轮（页面配置 API Key + 测试连接按钮，10-27 12:05）：
+- curl：`check` 格式错→400 BadKeyFormat（零网络）；模型名非法→BadCfg；**假 key 真探针→
+  `InvalidApiKey` 197ms 拒绝**；`config` 假 key 拒绝不落存；`{key:null}` 清除→keySource:null；
+  无 key `generate`→503 新文案（指向页面面板）。
+- 新 harness `scripts/site-verify/studio-key.cjs` 全绿：无 key 服务 → 面板出现且可交互
+  （步骤区正确置灰）→ 格式错即时红字 → 假 key 测试/保存均被拒 → status 仍 disabled →
+  localStorage 无残留 → file:// 面板隐藏；NO-ERRORS。
+- 回归：mock E2E（keyPanelHidden:true、19/19、zip 611967B、零 console 错）+
+  `shot.cjs` 整页 NO-CONSOLE-ERRORS（imgTotal 27、broken 0）。
+- 顺手修复并行会话搬迁 harness 后遗留的 ROOT 路径差一层问题（studio-e2e/studio-geo/shot）。

@@ -32,7 +32,10 @@
   const API = {
     status: '/api/cat-skin/status',
     generate: '/api/cat-skin/generate',
+    check: '/api/cat-skin/check',
+    config: '/api/cat-skin/config',
   };
+  const LS_CFG = 'creamcat.studio.cfg'; // 「记住在本浏览器」的 localStorage 键
 
   const state = {
     enabled: false,
@@ -65,6 +68,10 @@
     step2: $('#stu-step2'), step3: $('#stu-step3'),
     folderName: $('#stu-folder-name'), zipName: $('#stu-zip-name'),
     zip: $('#stu-zip'), again: $('#stu-again'),
+    keyPanel: $('#stu-key'), keyInput: $('#stu-key-input'), keyRemember: $('#stu-key-remember'),
+    keyTest: $('#stu-key-test'), keySave: $('#stu-key-save'), keyMsg: $('#stu-key-msg'),
+    keyModel: $('#stu-key-model'), keyBase: $('#stu-key-base'),
+    keyNote: $('#stu-keynote'), keyClear: $('#stu-key-clear'),
   };
 
   /* ─────────────── 目标清单 ─────────────── */
@@ -87,6 +94,7 @@
     el.offTxt.textContent = reason;
     el.off.hidden = false;
     el.panel.classList.add('is-off');
+    el.keyPanel.hidden = true; // 无本地服务时填 Key 无意义
     syncGo();
   }
 
@@ -616,6 +624,132 @@
     }
   }
 
+  /* ─────────────── API Key 配置面板 ─────────────── */
+
+  function readSavedCfg() {
+    try {
+      const v = JSON.parse(localStorage.getItem(LS_CFG) || 'null');
+      return v && typeof v.key === 'string' && v.key ? v : null;
+    } catch { return null; }
+  }
+
+  function formCfg() {
+    return {
+      key: el.keyInput.value.trim(),
+      model: (el.keyModel?.value || '').trim(),
+      baseUrl: (el.keyBase?.value || '').trim(),
+    };
+  }
+
+  function setKeyMsg(kind, text) {
+    el.keyMsg.dataset.kind = kind || '';
+    el.keyMsg.textContent = text || '';
+    el.keyMsg.hidden = !text;
+  }
+
+  async function postJson(pathname, body) {
+    const res = await fetch(pathname, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data) throw new Error(`服务返回 ${res.status}（非 JSON）`);
+    return data;
+  }
+
+  function setKeyBusy(on) {
+    el.keyTest.disabled = on; el.keySave.disabled = on; el.keyInput.disabled = on;
+  }
+
+  /** 测试连接（save=false）/ 保存并启用（save=true）：同一枚零成本探针，只验鉴权不生成不计费 */
+  async function testConnection(save) {
+    const cfg = formCfg();
+    if (!cfg.key) { setKeyMsg('err', '先粘贴 API Key（sk- 开头）'); return; }
+    if (!/^sk-/.test(cfg.key)) { setKeyMsg('err', 'Key 格式不对：应以 sk- 开头（百炼控制台 → API-KEY 页获取）'); return; }
+    setKeyBusy(true);
+    setKeyMsg('run', save ? '验证并保存中…' : '测试连接中（仅探针，不产生费用）…');
+    try {
+      const data = await postJson(save ? API.config : API.check, cfg);
+      if (!data.ok || data.valid === false) throw new Error(data.message || data.code || '验证失败');
+      if (data.warning) setKeyMsg('warn', `Key 有效，但百炼返回提醒：${data.warning}`);
+      else setKeyMsg('ok', save ? `✓ 已保存并启用 · 探针 ${data.ms}ms` : `✓ 连接成功 · 探针 ${data.ms}ms（未产生费用，未生成图片）`);
+      if (save) {
+        if (el.keyRemember.checked) localStorage.setItem(LS_CFG, JSON.stringify(cfg));
+        else localStorage.removeItem(LS_CFG);
+        el.keyInput.value = '';
+        await refreshStatus(true); // 已保存成功，跳过自动注入直接刷新
+      }
+    } catch (e) {
+      setKeyMsg('err', e.message || String(e));
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function clearRuntimeKey() {
+    try { await postJson(API.config, { key: null }); } catch { /* 服务不在也照常回禁用态 */ }
+    localStorage.removeItem(LS_CFG);
+    el.keyInput.value = '';
+    setKeyMsg('', '');
+    await refreshStatus();
+  }
+
+  async function fetchStatus() {
+    const res = await fetch(API.status, { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(`HTTP${res.status}`);
+    return data;
+  }
+
+  function applyEnabled(data) {
+    state.enabled = true;
+    state.mock = !!data.mock;
+    state.model = data.model || '';
+    el.panel.classList.remove('is-off');
+    el.off.hidden = true;
+    el.keyPanel.hidden = true;
+    el.keyNote.hidden = data.keySource !== 'runtime';
+    if (state.mock) {
+      el.drop.querySelector('.stu-drop-sub').textContent =
+        '联调模式（CAT_SKIN_MOCK=1）：返回内置精力桌宠素材，不调用真实 AI';
+    }
+    syncGo();
+  }
+
+  function showKeyForm(msg) {
+    state.enabled = false;
+    el.offTxt.textContent = '尚未配置百炼 API Key——在下方填写并「测试连接」通过后「保存并启用」，即可开始生成。';
+    el.off.hidden = false;
+    el.panel.classList.add('is-off');
+    el.keyPanel.hidden = false;
+    el.keyNote.hidden = true;
+    if (msg) setKeyMsg('warn', msg);
+    syncGo();
+  }
+
+  /** 拉 status；未配置时尝试用「记住的 Key」自动注入（skipAutoInject=刚手动保存过） */
+  async function refreshStatus(skipAutoInject) {
+    try {
+      let data = await fetchStatus();
+      if (data.enabled) { applyEnabled(data); return; }
+      const saved = skipAutoInject ? null : readSavedCfg();
+      if (saved) {
+        const r = await postJson(API.config, saved).catch(() => null);
+        if (r?.ok) {
+          data = await fetchStatus();
+          if (data.enabled) { applyEnabled(data); return; }
+        }
+        localStorage.removeItem(LS_CFG);
+        showKeyForm('之前记住的 Key 已失效，请重新填写');
+        return;
+      }
+      showKeyForm();
+    } catch {
+      setOff('生成服务未接入：本页需要配合本地服务运行（npm run site:dev）；纯静态部署时此功能不可用，其余内容不受影响。');
+    }
+  }
+
   /* ─────────────── 启动 ─────────────── */
 
   async function boot() {
@@ -680,30 +814,14 @@
       if (!el.step3.hidden) showResult(); // 实时同步 zip 名/文件夹名
     });
 
-    syncGo();
+    // API Key 面板交互
+    el.keyTest.addEventListener('click', () => testConnection(false));
+    el.keySave.addEventListener('click', () => testConnection(true));
+    el.keyClear.addEventListener('click', clearRuntimeKey);
+    el.keyInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') testConnection(true); });
 
-    // 服务探测：静态托管 / file:// / 未配 key → 禁用态
-    try {
-      const res = await fetch(API.status, { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(`HTTP${res.status}`);
-      if (!data.enabled) {
-        setOff('生成服务未配置：在启动下载页服务时注入百炼 API Key（DASHSCOPE_API_KEY=sk-… npm run site:dev），刷新本页即可用。');
-        return;
-      }
-      state.enabled = true;
-      state.mock = !!data.mock;
-      state.model = data.model || '';
-      el.panel.classList.remove('is-off');
-      el.off.hidden = true;
-      if (state.mock) {
-        el.drop.querySelector('.stu-drop-sub').textContent =
-          '联调模式（CAT_SKIN_MOCK=1）：返回内置精力桌宠素材，不调用真实 AI';
-      }
-      syncGo();
-    } catch {
-      setOff('生成服务未接入：本页需要配合本地服务运行（npm run site:dev，并配置 DASHSCOPE_API_KEY）；纯静态部署时此功能不可用，其余内容不受影响。');
-    }
+    syncGo();
+    await refreshStatus(); // 服务探测 + 记住的 Key 自动注入；失败/未配置 → 禁用态或 Key 表单
   }
 
   // 测试钩子（E2E harness 用；对普通访客无副作用）

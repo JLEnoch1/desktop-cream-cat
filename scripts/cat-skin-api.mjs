@@ -2,8 +2,10 @@
  * AI 毛发定制工坊 · 后端接口（仅随 scripts/serve-site.mjs 本地预览启用）。
  *
  * 职责：
- *  - GET  /api/cat-skin/status   → 服务是否可用（是否配置 DASHSCOPE_API_KEY / mock）+ 能力清单
+ *  - GET  /api/cat-skin/status   → 服务是否可用（是否配置 Key / mock）+ 能力清单 + keySource(env|runtime)
  *  - POST /api/cat-skin/generate → 调百炼「千问-图像编辑」把用户猫照片转成指定目标素材
+ *  - POST /api/cat-skin/check    → 测试连接：空 messages 探针验证 Key（零成本、不生成、不保存）
+ *  - POST /api/cat-skin/config   → 保存运行时 Key（仅进程内存，不写盘；{key:null} 清除）
  *
  * 生成路线（路线 B，产品裁决 2026-10-26）：把照片里的猫**重绘成 Q 版卡通角色定稿**，
  * 再以定稿锁角色，批量产出「统一画风、同一只猫」的两类素材：
@@ -34,10 +36,19 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const POSES_DIR = path.join(ROOT, 'site', 'assets', 'poses')
 
-const API_KEY = process.env.DASHSCOPE_API_KEY || ''
-const MODEL = process.env.CAT_SKIN_MODEL || 'qwen-image-2.0-pro'
-const BASE_URL = (process.env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com').replace(/\/+$/, '')
+const ENV_KEY = process.env.DASHSCOPE_API_KEY || ''
+const ENV_MODEL = process.env.CAT_SKIN_MODEL || ''
+const ENV_BASE = (process.env.DASHSCOPE_BASE_URL || '').replace(/\/+$/, '')
+const DEFAULT_MODEL = 'qwen-image-2.0-pro'
+const DEFAULT_BASE = 'https://dashscope.aliyuncs.com'
 const MOCK = process.env.CAT_SKIN_MOCK === '1'
+
+/** 页面「配置 API Key」面板注入的运行时配置（仅存进程内存：不写盘、不打日志明文、重启即失；env 优先） */
+const runtimeCfg = { key: '', model: '', baseUrl: '' }
+const effKey = () => ENV_KEY || runtimeCfg.key
+const effModel = () => ENV_MODEL || runtimeCfg.model || DEFAULT_MODEL
+const effBase = () => ENV_BASE || runtimeCfg.baseUrl || DEFAULT_BASE
+const keySource = () => (ENV_KEY ? 'env' : runtimeCfg.key ? 'runtime' : null)
 
 /** 动作序列帧（与 skin.json v2 单帧文件一一对应） */
 export const POSES = ['idle', 'walk1', 'walk2', 'sleep', 'drag', 'pet', 'tap']
@@ -221,11 +232,11 @@ function enqueue(fn) {
 }
 
 async function dashscopeEdit(images, prompt, style) {
-  const res = await fetch(`${BASE_URL}/api/v1/services/aigc/multimodal-generation/generation`, {
+  const res = await fetch(`${effBase()}/api/v1/services/aigc/multimodal-generation/generation`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${API_KEY}` },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${effKey()}` },
     body: JSON.stringify({
-      model: MODEL,
+      model: effModel(),
       input: {
         messages: [
           {
@@ -282,6 +293,56 @@ async function mockGenerate(target) {
   return { dataURL: `data:image/webp;base64,${b64}`, requestId: `mock-${target}-${Date.now()}` }
 }
 
+/* ─────────────────────────── Key 校验探针（零成本） ─────────────────────────── */
+
+const KEY_RE = /^sk-[A-Za-z0-9_-]{12,}$/;
+const PROBE_TIMEOUT_MS = 15_000;
+
+/**
+ * 用「空 messages」请求打一发 multimodal-generation：
+ * - Key 无效 → 鉴权层直接拒（401/InvalidApiKey）→ valid:false；
+ * - Key 有效 → 进到参数校验层报 InvalidParameter 之类（不会真正生成、不计费）→ valid:true。
+ * 账户级告警（如欠费 Arrearage）以 warning 透传给前端展示，但仍视为 Key 本身有效。
+ */
+async function probeKey(key, model, baseUrl) {
+  const t0 = Date.now();
+  let res;
+  try {
+    res = await fetch(`${baseUrl}/api/v1/services/aigc/multimodal-generation/generation`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, input: { messages: [] } }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+  } catch (e) {
+    return {
+      valid: false,
+      code: 'ProbeFailed',
+      message: e?.name === 'TimeoutError' ? `连不上百炼服务（超时 ${PROBE_TIMEOUT_MS / 1000}s），Key 未保存` : `连不上百炼服务：${e?.message || e}，Key 未保存`,
+      ms: Date.now() - t0,
+    };
+  }
+  let data = null;
+  try { data = await res.json(); } catch { /* 非 JSON 响应按状态码判 */ }
+  const ms = Date.now() - t0;
+  const code = data?.code || '';
+  if (res.status === 401 || /InvalidApiKey|Unauthorized|AccessDenied|InvalidAuthentication/i.test(code)) {
+    return { valid: false, code: code || `HTTP${res.status}`, message: data?.message || `API Key 无效（HTTP ${res.status}）`, ms };
+  }
+  if (res.ok && !code) return { valid: true, warning: '', ms };
+  const warning = code && !/InvalidParameter|BadRequest\.Input/i.test(code) ? `${code}${data?.message ? '：' + data.message : ''}` : '';
+  return { valid: true, warning, ms };
+}
+
+function sanitizeCfg(body) {
+  const key = String(body?.key ?? '').trim().slice(0, 512);
+  const model = String(body?.model ?? '').trim().slice(0, 64);
+  const baseUrl = String(body?.baseUrl ?? '').trim().replace(/\/+$/, '').slice(0, 200);
+  if (model && !/^[\w.-]+$/.test(model)) throw Object.assign(new Error('模型名只允许字母数字与 . _ -'), { code: 'BadCfg' });
+  if (baseUrl && !/^https?:\/\/[\w.-]+(:\d+)?([/?][\w./?&=%-]*)?$/.test(baseUrl)) throw Object.assign(new Error('服务地址需为合法 http(s) 地址'), { code: 'BadCfg' });
+  return { key, model, baseUrl };
+}
+
 /* ─────────────────────────── HTTP 接口 ─────────────────────────── */
 
 function sendJson(res, status, obj) {
@@ -316,9 +377,10 @@ export async function handleCatSkinApi(req, res, urlPath) {
     if (req.method !== 'GET') { sendJson(res, 405, { ok: false, code: 'MethodNotAllowed', message: '仅支持 GET' }); return true }
     sendJson(res, 200, {
       ok: true,
-      enabled: MOCK || !!API_KEY,
+      enabled: MOCK || !!effKey(),
       mock: MOCK,
-      model: MOCK ? 'mock' : MODEL,
+      model: MOCK ? 'mock' : effModel(),
+      keySource: MOCK ? null : keySource(),
       poses: POSES,
       parts: PARTS,
       styles: STYLES,
@@ -326,13 +388,54 @@ export async function handleCatSkinApi(req, res, urlPath) {
     return true
   }
 
+  if (urlPath === '/api/cat-skin/check' || urlPath === '/api/cat-skin/config') {
+    if (req.method !== 'POST') { sendJson(res, 405, { ok: false, code: 'MethodNotAllowed', message: '仅支持 POST' }); return true }
+    const isConfig = urlPath.endsWith('config')
+    let body
+    try { body = JSON.parse(await readBody(req, 16 * 1024)) } catch (e) {
+      sendJson(res, 400, { ok: false, code: 'BadJson', message: `请求体不是合法 JSON: ${e.message}` }); return true
+    }
+    // config 专属：清除运行时 Key（key:null）
+    if (isConfig && (body?.key === null || body?.key === '')) {
+      runtimeCfg.key = ''; runtimeCfg.model = ''; runtimeCfg.baseUrl = ''
+      console.log('[cat-skin] config: 运行时 Key 已清除')
+      sendJson(res, 200, { ok: true, cleared: true, keySource: keySource(), enabled: MOCK || !!effKey() })
+      return true
+    }
+    let cfg
+    try { cfg = sanitizeCfg(body) } catch (e) {
+      sendJson(res, 400, { ok: false, code: 'BadCfg', message: e.message }); return true
+    }
+    if (!KEY_RE.test(cfg.key)) {
+      sendJson(res, 400, { ok: false, code: 'BadKeyFormat', message: 'API Key 应以 sk- 开头（百炼控制台 → API-KEY 页获取）' }); return true
+    }
+    const model = cfg.model || ENV_MODEL || DEFAULT_MODEL
+    const baseUrl = cfg.baseUrl || ENV_BASE || DEFAULT_BASE
+    const probe = await probeKey(cfg.key, model, baseUrl)
+    if (!probe.valid) {
+      sendJson(res, 400, { ok: false, code: probe.code, message: probe.message, ms: probe.ms })
+      return true
+    }
+    if (isConfig) {
+      runtimeCfg.key = cfg.key; runtimeCfg.model = cfg.model; runtimeCfg.baseUrl = cfg.baseUrl
+      console.log(`[cat-skin] config: Key 已存入内存（尾号 …${cfg.key.slice(-4)}），model=${model}，base=${baseUrl}`)
+    }
+    sendJson(res, 200, {
+      ok: true, valid: true, saved: isConfig, ms: probe.ms, model,
+      warning: probe.warning || '',
+      keySource: isConfig ? keySource() : null,
+      enabled: MOCK || !!effKey(),
+    })
+    return true
+  }
+
   if (urlPath === '/api/cat-skin/generate') {
     if (req.method !== 'POST') { sendJson(res, 405, { ok: false, code: 'MethodNotAllowed', message: '仅支持 POST' }); return true }
-    if (!MOCK && !API_KEY) {
+    if (!MOCK && !effKey()) {
       sendJson(res, 503, {
         ok: false,
         code: 'NotConfigured',
-        message: '服务端未配置 DASHSCOPE_API_KEY，无法调用 AI 生成（启动 site:dev 时注入环境变量即可）',
+        message: '未配置 API Key：请在页面「配置百炼 API Key」面板填写，或启动服务时注入 DASHSCOPE_API_KEY',
       })
       return true
     }

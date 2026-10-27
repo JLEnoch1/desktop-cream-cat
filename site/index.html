@@ -353,6 +353,35 @@
         <span id="stu-off-txt">生成服务不可用</span>
       </div>
 
+      <div class="stu-keynote" id="stu-keynote" hidden>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3.4 8.3l3 3 6.2-6.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>正在使用页面配置的 API Key（仅存服务进程内存，不写盘、重启即失效）</span>
+        <button type="button" id="stu-key-clear" class="stu-btn ghost tiny">清除 Key</button>
+      </div>
+
+      <div class="stu-key" id="stu-key" hidden>
+        <h3>配置百炼 API Key</h3>
+        <p class="stu-key-desc">
+          在 <a href="https://bailian.console.aliyun.com/?tab=model#/api-key" target="_blank" rel="noopener">阿里云百炼控制台 → API-KEY</a>
+          免费获取（<code class="mono">sk-</code> 开头）。Key 只会发送给<b>本机</b>的本地服务（127.0.0.1）用于代理调用百炼，
+          仅存于服务进程内存——<b>不写入任何文件、不打日志、服务重启即消失</b>。
+        </p>
+        <div class="stu-key-row">
+          <input type="password" id="stu-key-input" placeholder="sk-xxxxxxxxxxxxxxxx…" autocomplete="off" spellcheck="false">
+          <button type="button" id="stu-key-test" class="stu-btn ghost">测试连接</button>
+          <button type="button" id="stu-key-save" class="stu-btn">保存并启用</button>
+        </div>
+        <div class="stu-key-row2">
+          <label class="stu-key-remember"><input type="checkbox" id="stu-key-remember"> 记住在本浏览器（localStorage，下次打开自动注入；公用电脑勿勾）</label>
+          <details class="stu-key-adv">
+            <summary>高级选项</summary>
+            <label>模型名<input type="text" id="stu-key-model" placeholder="默认 qwen-image-2.0-pro，旧 Key 可试 qwen-image-edit" autocomplete="off" spellcheck="false"></label>
+            <label>服务地址<input type="text" id="stu-key-base" placeholder="默认 https://dashscope.aliyuncs.com（专属域名/新加坡地域时填）" autocomplete="off" spellcheck="false"></label>
+          </details>
+        </div>
+        <p class="stu-key-msg" id="stu-key-msg" hidden></p>
+      </div>
+
       <div class="stu-step" id="stu-step1">
         <div class="stu-step-h"><b>1</b> 上传你家猫</div>
         <div class="stu-drop" id="stu-drop" role="button" tabindex="0" aria-label="上传猫咪照片或视频">
