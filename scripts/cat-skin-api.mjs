@@ -257,10 +257,77 @@ async function dashscopeEdit(images, prompt, style) {
   const imgUrl = data?.output?.choices?.[0]?.message?.content?.find((c) => c && c.image)?.image
   if (!imgUrl) throw Object.assign(new Error('DashScope 未返回图像'), { code: 'NoImage' })
   // 产物 URL 24h 过期 + 浏览器无法直连 OSS（跨域），服务端代下载转 dataURL
+  return { ...(await downloadAsDataUrl(imgUrl)), requestId: data.request_id || null }
+}
+
+/** 产物 URL（24h 过期 + OSS 跨域）→ 服务端代下载转 dataURL */
+async function downloadAsDataUrl(imgUrl) {
   const imgRes = await fetch(imgUrl, { signal: AbortSignal.timeout(60_000) })
   if (!imgRes.ok) throw Object.assign(new Error(`产物下载失败 HTTP${imgRes.status}`), { code: 'FetchImage' })
   const buf = Buffer.from(await imgRes.arrayBuffer())
-  return { dataURL: `data:image/png;base64,${buf.toString('base64')}`, requestId: data.request_id || null }
+  return { dataURL: `data:image/png;base64,${buf.toString('base64')}` }
+}
+
+/* ── 引擎二：通义万相图像编辑（wanx2.1-imageedit 等，异步任务 API）──
+ * 与千问同一个百炼 Key；账号无 qwen-image 权限时的备选（模型广场搜「万相-图像编辑」）。
+ * 仅支持单张底图 → 取 images 最后一张（派生姿态=idle 定稿，idle=最后一张照片），
+ * 与千问「输出比例以最后一张为准」的参考语义一致。0.14 元/张（北京，2026-10 原价）。 */
+const WANX_POLL_MS = 3_000
+
+function isWanxModel(model) { return /^wanx/i.test(String(model || '')) }
+
+async function dashscopeWanxEdit(images, prompt) {
+  const t0 = Date.now()
+  const res = await fetch(`${effBase()}/api/v1/services/aigc/image2image/image-synthesis`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${effKey()}`,
+      'X-DashScope-Async': 'enable',
+    },
+    body: JSON.stringify({
+      model: effModel(),
+      input: { function: 'description_edit', prompt, base_image_url: images[images.length - 1] },
+      parameters: { n: 1 },
+    }),
+    signal: AbortSignal.timeout(60_000),
+  })
+  let data = null
+  try { data = await res.json() } catch { data = null }
+  if (!res.ok || !data || data.code) {
+    const code = data?.code || `HTTP${res.status}`
+    throw Object.assign(new Error(data?.message || `DashScope 返回 ${res.status}（万相任务创建失败${data ? '' : '，非百炼 JSON 响应：检查服务地址'}）`), { code })
+  }
+  const taskId = data?.output?.task_id
+  if (!taskId) throw Object.assign(new Error('万相未返回 task_id'), { code: 'NoTaskId' })
+  // 轮询任务直到 SUCCEEDED / FAILED / 超时
+  while (Date.now() - t0 < GEN_TIMEOUT_MS) {
+    await new Promise((r) => setTimeout(r, WANX_POLL_MS))
+    const pr = await fetch(`${effBase()}/api/v1/tasks/${encodeURIComponent(taskId)}`, {
+      headers: { authorization: `Bearer ${effKey()}` },
+      signal: AbortSignal.timeout(30_000),
+    })
+    let pd = null
+    try { pd = await pr.json() } catch { pd = null }
+    if (!pd || pd.code) {
+      throw Object.assign(new Error(pd?.message || `任务查询失败 HTTP${pr.status}`), { code: pd?.code || `HTTP${pr.status}` })
+    }
+    const st = pd?.output?.task_status
+    if (st === 'SUCCEEDED') {
+      const imgUrl = pd?.output?.results?.[0]?.url
+      if (!imgUrl) throw Object.assign(new Error('万相任务成功但未返回图像 URL'), { code: 'NoImage' })
+      return { ...(await downloadAsDataUrl(imgUrl)), requestId: pd.request_id || null }
+    }
+    if (st && st !== 'PENDING' && st !== 'RUNNING') { // FAILED / CANCELED / UNKNOWN
+      throw Object.assign(new Error(pd?.output?.message || `万相任务 ${st}`), { code: pd?.output?.code || `Task${st}` })
+    }
+  }
+  throw Object.assign(new Error(`万相任务超时（${GEN_TIMEOUT_MS / 1000}s），task_id=${taskId}`), { code: 'TaskTimeout' })
+}
+
+/** 引擎分派：wanx* 走异步任务 API，其余走千问同步 multimodal API */
+function dashscopeGenerate(images, prompt, style) {
+  return isWanxModel(effModel()) ? dashscopeWanxEdit(images, prompt) : dashscopeEdit(images, prompt, style)
 }
 
 /* ─────────────────────────── mock（联调专用） ─────────────────────────── */
@@ -291,19 +358,25 @@ const KEY_RE = /^sk-[A-Za-z0-9_-]{12,}$/;
 const PROBE_TIMEOUT_MS = 15_000;
 
 /**
- * 用「空 messages」请求打一发 multimodal-generation：
- * - Key 无效 → 鉴权层直接拒（401/InvalidApiKey）→ valid:false；
- * - Key 有效 → 进到参数校验层报 InvalidParameter 之类（不会真正生成、不计费）→ valid:true。
- * 账户级告警（如欠费 Arrearage）以 warning 透传给前端展示，但仍视为 Key 本身有效。
+ * 零成本探针（按引擎选端点）：
+ * - 千问（默认）：空 messages 打 multimodal-generation；
+ * - 万相（wanx*）：空 input 打 image2image/image-synthesis（async 头）。
+ * 有效 Key → 参数校验层报错（不生成、不计费）→ valid:true；
+ * 非 JSON / 鉴权 / 权限 / 模型错 / 未知码 → 一律拒（见下方分级）。
  */
 async function probeKey(key, model, baseUrl) {
   const t0 = Date.now();
+  const wanx = isWanxModel(model);
   let res;
   try {
-    res = await fetch(`${baseUrl}/api/v1/services/aigc/multimodal-generation/generation`, {
+    res = await fetch(`${baseUrl}/api/v1/services/aigc/${wanx ? 'image2image/image-synthesis' : 'multimodal-generation/generation'}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, input: { messages: [] } }),
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${key}`,
+        ...(wanx ? { 'X-DashScope-Async': 'enable' } : {}),
+      },
+      body: JSON.stringify(wanx ? { model, input: {} } : { model, input: { messages: [] } }),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
   } catch (e) {
@@ -334,7 +407,7 @@ async function probeKey(key, model, baseUrl) {
       valid: false, code: code || `HTTP${res.status}`, ms,
       message: arrears
         ? `${raw || code}——账户欠费/未开通，请在百炼控制台充值或开通后重试`
-        : `${raw || code}——Key 被识别但无权访问该模型/资源。图像编辑当前模型为 qwen-image-2.0-pro（默认，模型名请留空）；qwen-image-edit 为早期模型、可能需单独开通。请到百炼控制台「模型广场」搜 qwen-image 确认已开通，子业务空间需管理员授权模型权限；北京/新加坡地域 Key 不可混用`,
+        : `${raw || code}——Key 被识别但无权访问该模型/资源。可先在「高级选项」把模型名改为 wanx2.1-imageedit（通义万相图像编辑，同一个百炼 Key，0.14 元/张）再测；若也不行，到百炼控制台「模型广场」搜 qwen-image / 万相-图像编辑 确认已开通（子业务空间需管理员授权；北京/新加坡地域 Key 不可混用）`,
     };
   }
   // 3) Key 无效 / 鉴权失败
@@ -343,7 +416,7 @@ async function probeKey(key, model, baseUrl) {
   }
   // 4) 模型不存在 / 名称错
   if (/Model\.?NotFound|ModelNotFound|InvalidModel/i.test(code)) {
-    return { valid: false, code, ms, message: `${raw || code}——模型名可能不对，图像编辑请用 qwen-image-2.0-pro（推荐，留空即默认）或 qwen-image-2.0；qwen-image-edit 为早期模型` };
+    return { valid: false, code, ms, message: `${raw || code}——模型名可能不对：留空用默认 qwen-image-2.0-pro，或填 wanx2.1-imageedit（万相图像编辑）/ qwen-image-2.0；qwen-image-edit 为早期模型` };
   }
   // 5) 走到参数校验层（空 messages 被拒）或 2xx → 鉴权+端点+模型全部 OK
   if (res.ok || /InvalidParameter|BadRequest\.?Input|MissingParameter|InvalidRequest/i.test(code)) {
@@ -485,7 +558,7 @@ export async function handleCatSkinApi(req, res, urlPath) {
     }
     const t0 = Date.now()
     try {
-      const out = await enqueue(() => (MOCK ? mockGenerate(target) : dashscopeEdit(images, buildPrompt(target, images.length, style), style)))
+      const out = await enqueue(() => (MOCK ? mockGenerate(target) : dashscopeGenerate(images, buildPrompt(target, images.length, style), style)))
       console.log(`[cat-skin] ${MOCK ? 'mock ' : ''}${style}/${kind}:${target} 完成 ${Date.now() - t0}ms`)
       sendJson(res, 200, { ok: true, target, kind, style, image: out.dataURL, requestId: out.requestId, mock: MOCK, ms: Date.now() - t0 })
     } catch (e) {

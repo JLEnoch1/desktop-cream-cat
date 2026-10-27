@@ -37,7 +37,7 @@ CAT_SKIN_MOCK=1 npm run site:dev
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `DASHSCOPE_API_KEY` | （空） | 百炼 API Key；空则可由页面「配置 API Key」面板运行时注入（见下），两者皆无时接口 503 NotConfigured |
-| `CAT_SKIN_MODEL` | `qwen-image-2.0-pro` | 图像编辑模型（当前推荐）；可改 `qwen-image-2.0`；`qwen-image-edit` 为早期模型可能需单独开通（面板高级选项也可改） |
+| `CAT_SKIN_MODEL` | `qwen-image-2.0-pro` | 图像编辑模型；可改 `qwen-image-2.0`、`wanx2.1-imageedit`（万相引擎，见下）；`qwen-image-edit` 为早期模型可能需单独授权（面板高级选项也可改） |
 | `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com` | 业务空间专属域名 / 新加坡地域时覆盖（面板高级选项也可改） |
 | `CAT_SKIN_MOCK` | （空） | `=1` 开联调模式 |
 
@@ -68,12 +68,26 @@ CAT_SKIN_MOCK=1 npm run site:dev
 进程内串行队列保证同一时刻只有一发 DashScope 调用。Key 全程不出本机（页面 → 127.0.0.1
 本地服务 → 百炼），服务端不落地任何图片（无状态）。
 
+### 双引擎（按模型名自动分派）
+
+| 引擎 | 触发 | 调用方式 |
+| --- | --- | --- |
+| 千问图像编辑（默认） | 模型名非 `wanx*`（如 `qwen-image-2.0-pro`） | 同步 `POST …/multimodal-generation/generation`，1–3 张参考图 |
+| 通义万相图像编辑（备选） | 模型名 `wanx*`（如 `wanx2.1-imageedit`） | 异步任务：`POST …/image2image/image-synthesis`（`X-DashScope-Async: enable`，`function=description_edit`）→ 3s 间隔轮询 `GET /api/v1/tasks/{id}` 至 SUCCEEDED/FAILED，总超时 240s |
+
+万相引擎仅支持**单张底图** → 取 `images` 最后一张（派生姿态/部件 = idle 定稿，idle = 最后
+一张照片），与千问「输出比例以最后一张为准」的参考语义一致；无 negative_prompt/size 参数
+（提示词内已含"纯白背景、禁柔边渐变"等约束）。计费 0.14 元/张（北京，2026-10 原价），
+RPM 120。**适用场景**：账号无 qwen-image 系列权限（`AUTH_RESOURCE_FORBIDDEN`）时的同 Key
+备选——探针同样按引擎打对应端点做零成本校验。
+
 ### `POST /api/cat-skin/check` / `POST /api/cat-skin/config`
 
 页面「配置百炼 API Key」面板的后端。请求：`{ "key": "sk-…", "model"?: "…", "baseUrl"?: "https://…" }`；
 `config` 另支持 `{ "key": null }` 清除运行时 Key。
 
-**零成本探针（保守判定）**：两个路由都用「空 messages」打一发 multimodal-generation，
+**零成本探针（保守判定，按引擎选端点）**：千问模型用「空 messages」打
+multimodal-generation；`wanx*` 模型用「空 input」打 image2image/image-synthesis（带 async 头）。
 **只有走到参数校验层被拒（`InvalidParameter`/`BadRequest.Input`）或返回 2xx 才算 Key 有效**
 （说明鉴权+端点+模型全通过，只是空输入被参数层挡下——**不会真正生成、不计费**）。其余一律
 **拒绝保存**并给对症提示，杜绝"假通过"：
@@ -224,3 +238,17 @@ my-cat/               ← 文件夹名 = 猫咪名字 slug（非 ASCII 名回落
   NO-CONSOLE-ERRORS）+ 几何（optPills 3、19 卡等宽、双端 0 溢出）。
 - 真图像 API 全链路仍需用户以有权访问 `qwen-image-2.0-pro` 的百炼 Key 实测（`qwen-image-edit`
   为早期模型，用户账号实测 `AUTH_RESOURCE_FORBIDDEN`；文档现推荐 qwen-image-2.0 系列）。
+
+五轮（万相备选引擎，10-27 14:30）：
+- 用户回报无 `qwen-image-edit` 能力，问替代方案 → 查证 `wanx2.1-imageedit`（万相-通义图像
+  编辑）在**同一百炼平台、同一 Key**下可用（0.14 元/张，RPM 120，指令编辑 function=
+  description_edit）；假 key curl 证实两个异步端点真实存在（均回 InvalidApiKey JSON）。
+- 服务端加**双引擎分派** `isWanxModel()`：wanx* → `dashscopeWanxEdit`（创建任务 + 3s 轮询
+  `/api/v1/tasks/{id}` + 240s 总超时 + 产物代下载）；探针同步适配（空 input + async 头）。
+  产物下载抽出 `downloadAsDataUrl()` 共用。
+- 面板：模型名输入加 `datalist` 候选（qwen-image-2.0-pro/qwen-image-2.0/wanx2.1-imageedit/
+  qwen-image-edit），desc 补「Forbidden 时改填 wanx2.1-imageedit」指引；探针 Forbidden/
+  ModelNotFound 文案同步给万相备选。
+- 验证：curl wanx 探针（假 key→InvalidApiKey 拒、example.com→HTTP405 非 JSON 拒）；
+  studio-key.cjs 全绿 NO-ERRORS；shot.cjs NO-CONSOLE-ERRORS。4321 已重启。
+  万相真实生成链路同样待有效 Key 实测（任务创建/轮询/取图三段均按官方文档形状实现）。

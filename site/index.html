@@ -364,7 +364,10 @@
         <p class="stu-key-desc">
           在 <a href="https://bailian.console.aliyun.com/?tab=model#/api-key" target="_blank" rel="noopener">阿里云百炼控制台 → API-KEY</a>
           免费获取（<code class="mono">sk-</code> 开头）。Key 只会发送给<b>本机</b>的本地服务（127.0.0.1）用于代理调用百炼，
-          仅存于服务进程内存——<b>不写入任何文件、不打日志、服务重启即消失</b>。
+          仅存于服务进程内存——<b>不写入任何文件、不打日志、服务重启即消失</b>。<br>
+          图像编辑默认用 <code class="mono">qwen-image-2.0-pro</code>；若测试提示无权访问（AUTH_RESOURCE_FORBIDDEN 等），
+          展开「高级选项」把模型名改成 <code class="mono">wanx2.1-imageedit</code>（通义万相图像编辑，同一个 Key）再测。
+          文本模型 Key / 其他网关（如 Anthropic 代理）不适用本功能。
         </p>
         <div class="stu-key-row">
           <input type="password" id="stu-key-input" placeholder="sk-xxxxxxxxxxxxxxxx…" autocomplete="off" spellcheck="false">
@@ -375,7 +378,14 @@
           <label class="stu-key-remember"><input type="checkbox" id="stu-key-remember"> 记住在本浏览器（localStorage，下次打开自动注入；公用电脑勿勾）</label>
           <details class="stu-key-adv">
             <summary>高级选项</summary>
-            <label>模型名<input type="text" id="stu-key-model" placeholder="建议留空（默认 qwen-image-2.0-pro）" autocomplete="off" spellcheck="false"></label>
+            <label>模型名<input type="text" id="stu-key-model" list="stu-key-models" placeholder="留空=qwen-image-2.0-pro；无权限填 wanx2.1-imageedit" autocomplete="off" spellcheck="false">
+              <datalist id="stu-key-models">
+                <option value="qwen-image-2.0-pro">千问图像编辑 Pro · 推荐（默认）</option>
+                <option value="qwen-image-2.0">千问图像编辑 · 加速版</option>
+                <option value="wanx2.1-imageedit">通义万相图像编辑 · 无千问图像权限时的备选</option>
+                <option value="qwen-image-edit">千问图像编辑早期版 · 可能需单独授权</option>
+              </datalist>
+            </label>
             <label>服务地址<input type="text" id="stu-key-base" placeholder="默认 https://dashscope.aliyuncs.com（专属域名/新加坡地域时填）" autocomplete="off" spellcheck="false"></label>
           </details>
         </div>
