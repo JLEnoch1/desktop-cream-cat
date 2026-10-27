@@ -1,5 +1,5 @@
 /* AI 毛发定制工坊 E2E：mock 服务 + 完整生成流程（像素风 × 姿态+部件 19 件）+ zip 下载校验
- * + 输出/画风切换行为 + 禁用态/移动端截图。
+ * + 输出勾选切换行为 + 禁用态/移动端截图（画风已固定像素游戏风）。
  * 运行：cd energy-pet && env -u ELECTRON_RUN_AS_NODE ./node_modules/.bin/electron --no-sandbox --disable-gpu scripts/site-verify/studio-e2e.cjs
  */
 const { app, BrowserWindow } = require('electron');
@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
     return document.querySelectorAll('.stu-card').length;
   })()`);
 
-  // ── 3. 注入参考图 + 切像素画风 ──
+  // ── 3. 注入参考图（画风已固定像素游戏风，无选择器） ──
   info.refsAdded = await win.webContents.executeJavaScript(`(async () => {
     const img = new Image();
     img.src = 'assets/poses/cat-idle.webp';
@@ -80,11 +80,8 @@ app.whenReady().then(async () => {
     window.__catStudio.addRef(c.toDataURL('image/jpeg', .9), 'e2e-cat');
     return window.__catStudio.state.refs.length;
   })()`);
-  info.pixelSelected = await win.webContents.executeJavaScript(`(() => {
-    const r = document.querySelector('input[name="stu-style"][value="pixel"]');
-    r.checked = true; r.dispatchEvent(new Event('change'));
-    return window.__catStudio.state.style;
-  })()`);
+  info.styleFixed = await win.webContents.executeJavaScript(`window.__catStudio.state.style`);
+  info.noStyleRadio = await win.webContents.executeJavaScript(`document.querySelectorAll('input[name="stu-style"]').length === 0 && !!document.querySelector('.stu-opt.is-fixed')`);
   info.goEnabled = await win.webContents.executeJavaScript(`!document.querySelector('#stu-go').disabled`);
   await win.webContents.executeJavaScript(`document.querySelector('#studio').scrollIntoView(); document.querySelector('#stu-name').value = '布丁E2E';`);
   await sleep(400);
@@ -119,16 +116,12 @@ app.whenReady().then(async () => {
   info.zip = zipDone;
   info.mainPhaseErrors = errors.slice();
 
-  // ── 7. 画风切回厚涂 → 结果作废（卡片回等待、step3 收起） ──
-  info.styleResetWorks = await win.webContents.executeJavaScript(`(() => {
-    const r = document.querySelector('input[name="stu-style"][value="chibi"]');
-    r.checked = true; r.dispatchEvent(new Event('change'));
-    return {
-      results: Object.keys(window.__catStudio.state.results).length,
-      step3Hidden: document.querySelector('#stu-step3').hidden,
-      waitCards: document.querySelectorAll('.stu-card.is-wait').length,
-    };
-  })()`);
+  // ── 7. 画风固定像素：生成后结果完整、无画风切换 UI ──
+  info.resultsIntact = await win.webContents.executeJavaScript(`({
+    style: window.__catStudio.state.style,
+    results: Object.keys(window.__catStudio.state.results).length,
+    styleRadios: document.querySelectorAll('input[name="stu-style"]').length,
+  })`);
 
   // ── 8. 移动端布局（重新生成一轮太慢，只测布局：直接量选项行与网格） ──
   win.setContentSize(430, 900);

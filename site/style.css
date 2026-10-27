@@ -1134,6 +1134,14 @@ section[id], div[id="download"] { scroll-margin-top: 100px; }
   background: var(--mint-soft);
   box-shadow: 0 0 0 2px rgba(174, 199, 166, .3);
 }
+/* 固定画风（无 input，纯展示）——沿用选中态视觉 */
+.stu-opt.is-fixed {
+  border-color: var(--green-hi);
+  background: var(--mint-soft);
+  box-shadow: 0 0 0 2px rgba(174, 199, 166, .3);
+  cursor: default;
+}
+.stu-opt.is-fixed:hover { border-color: var(--green-hi); }
 /* 部件定稿锚点卡（仅部件模式下的 idle） */
 .stu-card.is-anchor figcaption::after {
   content: "定稿锚点";

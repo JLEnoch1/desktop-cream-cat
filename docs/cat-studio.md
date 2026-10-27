@@ -5,8 +5,8 @@
 > 角色定稿**，再以定稿锁角色批量产出「统一画风、同一只猫」的两类素材——**动作序列帧 ×7**
 > （发呆/散步×2/打盹/被拎起/被摸头/敲键盘，可直接装进 CreamCat）与 **Live2D 式部件拆层稿
 > ×12**（脸/头轮廓、左右眼、上下眉毛、嘴巴、双前爪、身体、尾巴、毛发遮挡层、眼睛高光/阴影层，
-> 供分层动画制作与画师二创），打包成皮肤包 zip。画风三选：厚涂 Q 版（推荐）/ 扁平 Q 版 /
-> 像素游戏风。
+> 供分层动画制作与画师二创），打包成皮肤包 zip。**画风固定为像素游戏风**（复古桌宠质感、
+> 硬边像素块、限色约 32 色；2026-10-27 裁决：厚涂 Q 版 / 扁平 Q 版已下线）。
 
 ## 组成
 
@@ -52,13 +52,13 @@ CAT_SKIN_MOCK=1 npm run site:dev
 { "ok": true, "enabled": true, "mock": false, "model": "qwen-image-2.0-pro",
   "keySource": "env|runtime|null",
   "poses": ["idle", "..."], "parts": [{ "id": "face", "label": "脸/头轮廓" }, "..."],
-  "styles": ["chibi", "flat", "pixel"] }
+  "styles": ["pixel"] }
 ```
 
 ### `POST /api/cat-skin/generate`
 
-请求：`{ "pose" 或 "part": "<id>", "style": "chibi|flat|pixel", "images": ["data:image/jpeg;base64,...", ...] }`
-（`pose` ∈ 七姿态、`part` ∈ 12 部件，二选一必填；style 缺省 chibi；images 1–3 张，
+请求：`{ "pose" 或 "part": "<id>", "style": "pixel", "images": ["data:image/jpeg;base64,...", ...] }`
+（`pose` ∈ 七姿态、`part` ∈ 12 部件，二选一必填；style 仅 `pixel`（缺省即 pixel，传其它值 400 BadStyle）；images 1–3 张，
 单张 ≤10MB 由前端缩放保证；请求体上限 40MB）
 
 成功：`{ "ok": true, "target": "face", "kind": "pose|part", "style": "pixel", "image": "data:image/png;base64,...", "requestId": "...", "ms": 23456 }`
@@ -73,10 +73,23 @@ CAT_SKIN_MOCK=1 npm run site:dev
 页面「配置百炼 API Key」面板的后端。请求：`{ "key": "sk-…", "model"?: "…", "baseUrl"?: "https://…" }`；
 `config` 另支持 `{ "key": null }` 清除运行时 Key。
 
-**零成本探针**：两个路由都用「空 messages」打一发 multimodal-generation——Key 无效 →
-鉴权层拒（401/InvalidApiKey）→ 接口 400 拒绝；Key 有效 → 进到参数校验层报错（**不会真正
-生成、不计费**）→ 通过。账户级告警（如欠费）以 `warning` 字段透传展示。网络不通 →
-`ProbeFailed`，Key 不保存。
+**零成本探针（保守判定）**：两个路由都用「空 messages」打一发 multimodal-generation，
+**只有走到参数校验层被拒（`InvalidParameter`/`BadRequest.Input`）或返回 2xx 才算 Key 有效**
+（说明鉴权+端点+模型全通过，只是空输入被参数层挡下——**不会真正生成、不计费**）。其余一律
+**拒绝保存**并给对症提示，杜绝"假通过"：
+
+| 探针响应 | 判定 | 常见成因 |
+| --- | --- | --- |
+| 非 JSON（HTML 404/405 等） | ✗ 拒绝 | 服务地址不是百炼（如内网 Anthropic 文本网关 `ai-gateway…/ai-llm/anthropic`） |
+| 401 / `InvalidApiKey` / `Unauthorized` | ✗ 拒绝 | Key 无效 |
+| 403 / `*Forbidden*` / `AccessDenied` / `Arrearage` | ✗ 拒绝 | Key 有效但无权访问该图像模型（多为文本 Key、未开通千问图像编辑、非该业务空间） |
+| `Model*NotFound` | ✗ 拒绝 | 模型名错（图像编辑用 `qwen-image-edit`） |
+| 其它未知错误码 | ✗ 拒绝 | 保守兜底，透传原始 code/message |
+| `InvalidParameter` / 2xx | ✓ 通过 | 鉴权+端点+模型均 OK |
+
+网络不通 → `ProbeFailed`，Key 不保存。历史教训：旧探针对"非 401 的一切"都判通过，导致
+误配文本网关（生成时 404）与 `AUTH_RESOURCE_FORBIDDEN` 文本 Key（生成时失败）都被放行；
+2026-10-27 改为上表的保守判定后，"测试连接"即可当场拦下这些误配。
 
 - `check`：只测试（面板「测试连接」按钮），不保存；返回 `{ ok, valid, ms, warning? }`。
 - `config`：探针通过后把 `{key, model, baseUrl}` 存入进程内存并翻转 `enabled`；
@@ -102,12 +115,11 @@ CAT_SKIN_MOCK=1 npm run site:dev
 2. **定稿参考**：`idle` 只用真猫照片（1–3 张）；其余姿态与**全部部件**把已生成的 `idle`
    定稿作为最后一张参考图（`walk2` 用 `walk1` 定稿，保证左右爪交替成对）；提示词明确
    「保持与定稿形象完全一致的画风、配色、描边与花纹」。
-3. **画风三选**（style → `STYLE_BLOCKS` + 专属 negative_prompt）：
-   - `chibi` 厚涂 Q 版（默认推荐）：深棕描边、厚涂柔和光影、奶油质感配色；
-   - `flat` 扁平 Q 版：均匀描边、干净色块、贴纸感；
-   - `pixel` 像素游戏风：方形像素块、硬边无抗锯齿、限色约 32 色、复古桌宠质感
-     （negative 额外禁柔边/渐变/抗锯齿模糊）。
-   **切换画风 = 整套作废重画**（定稿语境变了，旧结果不可混用），前端自动清空并提示。
+3. **画风固定像素游戏风**（2026-10-27 裁决，`STYLES=['pixel']`，`STYLE_BLOCKS.pixel` +
+   专属 negative_prompt 禁柔边/渐变/抗锯齿模糊/厚涂/照片写实）：整幅由方形像素块构成、
+   硬边无抗锯齿、限色约 32 色、深色像素描边、色块阶表现毛发明暗、大头小身 Q 版比例、
+   复古桌宠/电子宠物游戏质感、动作感强。前端无画风选择器（`state.style` 恒 `'pixel'`），
+   页面用一个 `.stu-opt.is-fixed` 静态 pill 展示当前画风。
 4. **部件拆层稿**（`PART_DESC` + `PART_RULES`）：每件只画单一部件、居中留白、纯白背景，
    按 Live2D 分层习惯拆分（脸部基底不含五官细节；毛发遮挡层=悬浮的刘海/颊侧/胸前毛缕；
    眼睛高光/阴影层=按定稿眼位排布的高光与阴影形状）。**app 皮肤管线不消费 parts/**
@@ -194,3 +206,20 @@ my-cat/               ← 文件夹名 = 猫咪名字 slug（非 ASCII 名回落
 - 回归：mock E2E（keyPanelHidden:true、19/19、zip 611967B、零 console 错）+
   `shot.cjs` 整页 NO-CONSOLE-ERRORS（imgTotal 27、broken 0）。
 - 顺手修复并行会话搬迁 harness 后遗留的 ROOT 路径差一层问题（studio-e2e/studio-geo/shot）。
+
+四轮（画风收敛像素 + 探针保守化，10-27 14:05）：
+- 触发：用户填内网 Anthropic 文本网关（`model=Bailian-Qwen3.8-Max`、
+  `base=ai-gateway…/ai-llm/anthropic`）→ 旧探针误判"连接成功"→ 19 件生成全 `HTTP404`；
+  换真百炼但填文本模型又遇 `AUTH_RESOURCE_FORBIDDEN` 仍被旧探针放行。用户裁决：**画风只保留
+  像素游戏风**。
+- 画风：`STYLES=['pixel']`，删 `STYLE_BLOCKS`/`NEGATIVE_BY_STYLE` 的 chibi/flat，缺省 style
+  改 pixel；前端删画风 radio 组与切换作废逻辑、`state.style` 恒 `'pixel'`、页面改
+  `.stu-opt.is-fixed` 静态 pill；`buildPrompt`/generate 缺省与 fallback 全指向 pixel。
+- 探针：改保守判定（见上表）——非 JSON、403/Forbidden、Model*NotFound、未知码一律拒存并给
+  对症文案；只有 `InvalidParameter`/2xx 判通过。generate 的 404 文案补"检查服务地址/模型名"。
+- curl 复验：`status.styles=['pixel']`；假 key 打真百炼 → `InvalidApiKey` 拒；假 key 打
+  `example.com` → `HTTP405` 非 JSON 拒（带网关提示）；chibi 无 key → NotConfigured（有 key 则 BadStyle）。
+- 回归全绿：mock E2E（styleFixed=pixel、noStyleRadio、19/19、zip 611967B、零错）+
+  Key 面板（假 key 拒、file:// 隐藏、NO-ERRORS）+ 整页 shot（imgTotal 27、broken 0、
+  NO-CONSOLE-ERRORS）+ 几何（optPills 3、19 卡等宽、双端 0 溢出）。
+- 真图像 API 全链路仍需用户在百炼开通 qwen-image-edit 的有效 Key 实测（本机无可用图像 Key）。

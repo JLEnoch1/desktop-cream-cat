@@ -13,7 +13,7 @@
  *  2. 部件拆层稿（PARTS，12 件）：脸/头轮廓、左右眼、上下眉毛、嘴巴、双前爪、身体、尾巴、
  *     毛发遮挡层、眼睛高光/阴影层 → Live2D 式分层素材（画师二创/rigging 参考，app 不直接消费）。
  *
- * 画风（style）：chibi=厚涂 Q 版（默认推荐）/ flat=扁平 Q 版 / pixel=像素游戏风（传统桌宠感）。
+ * 画风（style）：pixel=像素游戏风（2026-10-27 裁决：唯一画风，chibi/flat 已下线）。
  *
  * 真 AI 路线：DashScope multimodal-generation（qwen-image 系列图像编辑），
  * Base64 图片直传、服务端代下载产物图（结果 URL 只有 24h 有效，且避免浏览器跨域）。
@@ -70,22 +70,16 @@ export const PARTS = [
 ]
 const PART_IDS = PARTS.map((p) => p.id)
 
-/** 画风 */
-export const STYLES = ['chibi', 'flat', 'pixel']
+/** 画风：产品裁决 2026-10-27 —— 只保留像素游戏风（chibi/flat 已下线） */
+export const STYLES = ['pixel']
 
 /* ─────────────────────────── 提示词 ─────────────────────────── */
 
 const STYLE_BLOCKS = {
-  chibi:
-    '厚涂Q版卡通角色稿：大头小身的Q版比例、圆润的脸型和轮廓、流畅的深棕色描边、' +
-    '厚涂上色带柔和的光影过渡、奶油质感的柔和配色、色彩明亮温暖、儿童绘本插画品质',
-  flat:
-    '扁平Q版卡通角色稿：大头小身的Q版比例、圆润的脸型和轮廓、粗细均匀的深棕色描边、' +
-    '扁平插画上色——干净的色块填充、极少渐变、无复杂光影、色彩明亮温暖、贴纸般干净利落',
   pixel:
     '像素游戏风角色稿：整幅图由清晰的方形像素块构成、像素边缘硬朗无抗锯齿、' +
     '限制调色板（约32色）、深色像素描边、用色块阶表现毛发明暗、大头小身的Q版比例、' +
-    '复古桌宠/电子宠物游戏质感',
+    '复古桌宠/电子宠物游戏质感、动作感强',
 }
 
 const IDENTITY =
@@ -164,8 +158,6 @@ const PART_DESC = {
 const NEGATIVE_BASE =
   '文字、水印、logo、边框、人手、人物、多余的猫、复杂背景、地面阴影、模糊、肢体畸形、多余肢体'
 const NEGATIVE_BY_STYLE = {
-  chibi: `${NEGATIVE_BASE}、照片写实风格、像素风`,
-  flat: `${NEGATIVE_BASE}、照片写实风格、像素风、厚涂光影`,
   pixel: `${NEGATIVE_BASE}、照片写实风格、柔边、渐变、抗锯齿模糊、厚涂`,
 }
 
@@ -174,8 +166,8 @@ const NEGATIVE_BY_STYLE = {
  * 约定：非 idle 目标时，最后一张图 = 已定稿的卡通形象（walk2 优先用 walk1 定稿，
  * 其余姿态与全部部件用 idle 定稿），前面 1-2 张 = 真猫照片。
  */
-export function buildPrompt(target, nImages, style = 'chibi') {
-  const styleBlock = STYLE_BLOCKS[style] || STYLE_BLOCKS.chibi
+export function buildPrompt(target, nImages, style = 'pixel') {
+  const styleBlock = STYLE_BLOCKS[style] || STYLE_BLOCKS.pixel
   if (POSES.includes(target)) return buildPosePrompt(target, nImages, styleBlock)
   if (PART_IDS.includes(target)) return buildPartPrompt(target, nImages)
   throw Object.assign(new Error(`未知目标 ${target}`), { code: 'BadTarget' })
@@ -250,7 +242,7 @@ async function dashscopeEdit(images, prompt, style) {
         size: '1024*1024',
         prompt_extend: false,
         watermark: false,
-        negative_prompt: NEGATIVE_BY_STYLE[style] || NEGATIVE_BY_STYLE.chibi,
+        negative_prompt: NEGATIVE_BY_STYLE[style] || NEGATIVE_BY_STYLE.pixel,
       },
     }),
     signal: AbortSignal.timeout(GEN_TIMEOUT_MS),
@@ -259,7 +251,7 @@ async function dashscopeEdit(images, prompt, style) {
   try { data = await res.json() } catch { data = null }
   if (!res.ok || !data || data.code) {
     const code = data?.code || `HTTP${res.status}`
-    const message = data?.message || `DashScope 返回 ${res.status}`
+    const message = data?.message || `DashScope 返回 ${res.status}${data ? '' : '（非百炼 JSON 响应：请检查「高级选项」服务地址是否为 https://dashscope.aliyuncs.com、模型名是否为图像编辑模型如 qwen-image-edit——文本/Anthropic 网关不适用）'}`
     throw Object.assign(new Error(message), { code })
   }
   const imgUrl = data?.output?.choices?.[0]?.message?.content?.find((c) => c && c.image)?.image
@@ -326,12 +318,39 @@ async function probeKey(key, model, baseUrl) {
   try { data = await res.json(); } catch { /* 非 JSON 响应按状态码判 */ }
   const ms = Date.now() - t0;
   const code = data?.code || '';
-  if (res.status === 401 || /InvalidApiKey|Unauthorized|AccessDenied|InvalidAuthentication/i.test(code)) {
-    return { valid: false, code: code || `HTTP${res.status}`, message: data?.message || `API Key 无效（HTTP ${res.status}）`, ms };
+  const raw = data?.message || '';
+
+  // 1) 非百炼 JSON 响应（网关/HTML 404 等）→ 服务地址不是 DashScope 图像 API
+  if (!data) {
+    return {
+      valid: false, code: `HTTP${res.status}`, ms,
+      message: `服务地址返回 HTTP ${res.status} 且非百炼 JSON 响应——「服务地址」应为 https://dashscope.aliyuncs.com，且需百炼图像编辑 API（文本/Anthropic 网关如 ai-gateway…/ai-llm/anthropic 不适用）`,
+    };
   }
-  if (res.ok && !code) return { valid: true, warning: '', ms };
-  const warning = code && !/InvalidParameter|BadRequest\.Input/i.test(code) ? `${code}${data?.message ? '：' + data.message : ''}` : '';
-  return { valid: true, warning, ms };
+  // 2) Key 有效但无权访问该资源/模型（最常见的误配：文本 Key、未开通图像模型）——先于「无效」判定
+  if (/Forbidden|ResourceForbidden|AccessDenied|NoPermission|Arrearage|Throttling/i.test(code) || res.status === 403) {
+    const arrears = /Arrearage/i.test(code);
+    return {
+      valid: false, code: code || `HTTP${res.status}`, ms,
+      message: arrears
+        ? `${raw || code}——账户欠费/未开通，请在百炼控制台充值或开通后重试`
+        : `${raw || code}——Key 被识别但无权访问该模型/资源。请在百炼控制台开通「千问图像编辑(qwen-image-edit)」模型、并确认此 Key 属于开通了图像生成的业务空间；文本模型 Key 不能用于本功能`,
+    };
+  }
+  // 3) Key 无效 / 鉴权失败
+  if (res.status === 401 || /InvalidApiKey|Unauthorized|InvalidAuthentication/i.test(code)) {
+    return { valid: false, code: code || `HTTP${res.status}`, ms, message: raw || `API Key 无效（HTTP ${res.status}）` };
+  }
+  // 4) 模型不存在 / 名称错
+  if (/Model\.?NotFound|ModelNotFound|InvalidModel/i.test(code)) {
+    return { valid: false, code, ms, message: `${raw || code}——模型名可能不对，图像编辑请用 qwen-image-edit（或 qwen-image-2.0-pro）` };
+  }
+  // 5) 走到参数校验层（空 messages 被拒）或 2xx → 鉴权+端点+模型全部 OK
+  if (res.ok || /InvalidParameter|BadRequest\.?Input|MissingParameter|InvalidRequest/i.test(code)) {
+    return { valid: true, warning: '', ms };
+  }
+  // 6) 其它未知错误码：保守判失败（不放行），透传原始信息
+  return { valid: false, code: code || `HTTP${res.status}`, ms, message: raw || `百炼返回 ${code || res.status}（未识别，保守拒绝保存）` };
 }
 
 function sanitizeCfg(body) {
@@ -445,7 +464,7 @@ export async function handleCatSkinApi(req, res, urlPath) {
       return true
     }
     const { pose, part, images } = body || {}
-    const style = body?.style || 'chibi'
+    const style = body?.style || 'pixel'
     const target = pose || part
     const kind = pose ? 'pose' : 'part'
     if ((pose && part) || !target) {

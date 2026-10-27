@@ -1,7 +1,7 @@
 /* 精力桌宠 CreamCat · AI 毛发定制工坊 — 下载页前端逻辑（零依赖原生 JS，defer 加载）。
  *
- * 流程：上传照片/视频 →（视频自动抽帧挑参考帧）→ 选画风（厚涂Q版/扁平Q版/像素游戏风）与
- * 输出内容（动作序列帧七姿态 / Live2D 式部件拆层稿×12）→ 按 idle 定稿 → 其余姿态 → 部件
+ * 流程：上传照片/视频 →（视频自动抽帧挑参考帧）→ 选输出内容（动作序列帧七姿态 / Live2D 式
+ * 部件拆层稿×12；画风固定像素游戏风）→ 按 idle 定稿 → 其余姿态 → 部件
  * 串行链式生成（非 idle 目标附带定稿形象图做参考，锁「统一画风、同一只猫」）→ 卡片实时预览 →
  * 浏览器端打包 skin.json v2 + 姿态帧 + parts/ 部件层为 zip → 附安装指引（解压进 skins 目录
  * 即被 app 热重载；parts/ 为素材稿，app 不直接消费）。
@@ -23,7 +23,7 @@
     mouth: '嘴巴', 'eye-l': '左眼', 'eye-r': '右眼', 'brow-up': '眉毛上', 'brow-low': '眉毛下',
     'fur-overlay': '毛发遮挡层', 'eye-light': '眼睛高光/阴影层',
   };
-  const STYLE_LABEL = { chibi: '厚涂 Q 版', flat: '扁平 Q 版', pixel: '像素游戏风' };
+  const STYLE_LABEL = { pixel: '像素游戏风' };
   const MAX_REFS = 3;          // DashScope 图像编辑单次最多 3 图
   const IMG_MAX_BYTES = 12e6;  // 原图上限（缩放后远低于 API 10MB 限制）
   const VIDEO_MAX_BYTES = 100e6;
@@ -44,7 +44,7 @@
     refs: [],            // [{dataURL, label, fromVideo?}]
     videoFrames: null,   // [{dataURL, t}] 抽帧候选
     videoSel: new Set(), // 选中的候选下标
-    style: 'chibi',      // chibi | flat | pixel
+    style: 'pixel',      // 画风固定像素游戏风（2026-10-27 裁决，唯一画风）
     wantPoses: true,     // 输出：动作序列帧七姿态
     wantParts: true,     // 输出：部件拆层稿 ×12
     results: {},         // target → {image(dataURL), ms}
@@ -768,22 +768,6 @@
     el.drop.addEventListener('drop', (e) => {
       if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
     });
-
-    // 画风切换：画风即角色定稿语境，切换后旧结果作废
-    for (const radio of document.querySelectorAll('input[name="stu-style"]')) {
-      radio.addEventListener('change', () => {
-        if (!radio.checked) return;
-        state.style = radio.value;
-        if (Object.keys(state.results).length && !state.busy) {
-          state.results = {};
-          state.curTargets = [];
-          el.step3.hidden = true;
-          el.progress.hidden = true;
-          buildGrid(currentTargets());
-        }
-        syncGo();
-      });
-    }
 
     // 输出内容勾选：重建卡片网格，丢弃不再需要的结果
     const onOutputToggle = () => {
