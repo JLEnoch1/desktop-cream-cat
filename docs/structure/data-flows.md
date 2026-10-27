@@ -16,18 +16,34 @@ app.whenReady()  →  new Coordinator({userDataPath})
                  →  registerIpc() → createWindow() → coordinator.start()
                       ├→ deck.seedIfEmpty()        （写 6 条初始版本历史）
                       ├→ log.append(sessionStartedDraft())
-                      ├→ weather.refresh()         （不阻塞）
+                      ├→ refreshWeather()          （不阻塞；**天气刷新+广播唯一入口**：
+                      │     previous=weather.current().condition → weather.refresh()
+                      │     → emit('weather:changed', {source, changed, condition, previous})）
                       ├→ **3 个 setInterval（全 push 进 `timers`）**：
-                      │     weather(30min) / insight(10min) / **checkReportDue(60s)**
+                      │     weather(30min, 走 refreshWeather) / insight(10min) / **checkReportDue(60s)**
                       ├→ maybeMorningBaseline()    （弹晨间基线滑动卡）
                       ├→ insightStartupTimer = setTimeout(runInsightBatch, 3s)
                       └→ **geoEnabled 时** geoTimer = setTimeout(**1500ms**,   ← 延迟避开启动期网络争抢
                             resolveGeo(log) → weather.setLocation(lat,lon,city,province)
                             → bus.emit('geo:changed')
-                            → await weather.refresh() → bus.emit('weather:changed', {source})
+                            → await refreshWeather() → bus.emit('weather:changed', {…,changed})
                             .catch(() => {})          ← 定位失败静默，不冒泡不重试)
                  ⚠️ stop() 须单独 clearTimeout(insightStartupTimer / geoTimer / adjustTimer)，
                     它们不在 `timers` 数组（那只装 setInterval）；漏清会报 "database is not open"。
+```
+
+**①b 天气 → 猫心情链路（实时天气绑定头顶挂件）**
+```
+refreshWeather()（启动首刷 / 30min 定时 / IP 定位后 / HUD 天气图标点击 weather:refresh IPC / 托盘「刷新天气」）
+  → bus.emit('weather:changed', {source, changed, condition, previous})
+  → main/index.ts 订阅：flushState()（state:update → HUD 天气图标）
+        + pushMood()（cat:mood 重推，JSON 去重；emotion.overlay 已按
+          resolveWeatherOverlay(energy, condition) 重算 —— 唯一门槛入口：
+          精力≥8+晴=sunbeam 出太阳 / 精力<8+雨雷=rain-drop·storm-bolt 头顶落小雨）
+        + 仅 changed=true 时 react('weather') → 猫按**新** mood 的天气吐槽
+          （先 pushMood 再 react：同一 webContents IPC 有序，气泡文案不会引用旧天气）
+  → catWin cat-app.ts onMood → applyEffectiveMood() → spriteSkin.setOverlay()
+  → drawWeatherOverlay()：雨丝循环下落 / 太阳光芒旋转（独立图层，不进表情状态机）
 ```
 
 **② 写链路（所有状态变更的唯一路径）**

@@ -16,7 +16,7 @@ import type { EvidenceCounts } from '../storage/sqlite.js';
 import { dayRangeMs, localDateStr } from '../storage/sqlite.js';
 import type { DomainEvent } from '../core/events.js';
 import { tempId, round2 } from '../core/events.js';
-import type { InsightRecommendation, WeeklyReport } from '../core/types.js';
+import type { InsightRecommendation, WeeklyReport, DailyRecap, DailyRecapItem } from '../core/types.js';
 import { foldWithTrace, INITIAL_ENERGY } from '../ledger/fold.js';
 
 /** 偏差判定阈值：|actual - predicted| >= 0.5 视为一次「不匹配」 */
@@ -196,6 +196,53 @@ export class InsightEngine {
       tasksCompleted, recoveriesTaken,
       daily, peakDrainHour, bestRecovery,
       narrative,
+    };
+  }
+
+  /* ─────────────────────────── 每日复盘 ─────────────────────────── */
+
+  /**
+   * 每日复盘清单（17:30 弹窗日常内容源；用户裁定 2026-10-27：每日弹的应是当日复盘，
+   * 而非「本周精力手账」——周手账保留在周五确认弹窗与右键「本周报告」查看态）。
+   * 单次扫描当日事件流：明细行 + 汇总统计，数据全部来自 fold，非拍脑袋。
+   * 语义注意：任务完成 = 成就感回血（TASK_COMPLETE_PREDICTED，正值），不是消耗。
+   */
+  dailyRecap(at = new Date(this.now())): DailyRecap {
+    const ds = localDateStr(at);
+    const [dStart, dEnd] = dayRangeMs(ds);
+    // 开盘精力 = 当日 0 点前的全量 fold（与周报同一算法）
+    const prior = this.log.queryRange(0, dStart).filter(isEnergyAffecting);
+    const openEnergy = foldWithTrace(prior, INITIAL_ENERGY).energy;
+    const events = this.log.queryRange(dStart, dEnd);
+    const { energy: closeEnergy } = foldWithTrace(events, openEnergy);
+
+    const items: DailyRecapItem[] = [];
+    let tasksCompleted = 0;
+    let recoveriesTaken = 0;
+    let taskGain = 0;
+    let recoverGain = 0;
+    for (const ev of events) {
+      const delta = round2(ev.actual_delta ?? 0);
+      if (ev.payload.kind === 'task.completed') {
+        tasksCompleted++;
+        taskGain += delta;
+        items.push({ kind: 'task', name: ev.payload.title, delta, at: ev.at });
+      } else if (ev.payload.kind === 'recovery.taken') {
+        recoveriesTaken++;
+        recoverGain += delta;
+        items.push({ kind: 'recovery', name: ev.payload.itemName, delta, at: ev.at });
+      }
+    }
+    return {
+      date: ds,
+      items,
+      tasksCompleted,
+      taskGain: round2(taskGain),
+      recoveriesTaken,
+      recoverGain: round2(recoverGain),
+      openEnergy: round2(openEnergy),
+      closeEnergy: round2(closeEnergy),
+      netChange: round2(closeEnergy - openEnergy),
     };
   }
 

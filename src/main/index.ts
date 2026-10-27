@@ -112,6 +112,50 @@ function computeUiBounds(): Electron.Rectangle {
   };
 }
 
+/* ── uiWin 跟随桌宠（用户裁定 2026-10-27：功能按钮要跟着桌宠走） ──
+ * uiWin 不再钉死屏幕右下角，而是锚定 catWin：
+ *  - 水平：优先贴猫右侧（⚡ 按钮在 uiWin 左缘，正好紧邻猫）；右侧放不下翻到左侧；
+ *  - 垂直：底边与猫窗底边（猫脚线）对齐；
+ *  - 全部钳制在猫所在显示器的工作区内。
+ * 尺寸仍由 computeUiBounds 的小屏钳制决定，这里只改 x/y；猫窗不可用时回退角落锚。
+ * 热区是「窗口内 DIP 坐标」，命中轮询每次用 getBounds() 实时换算 → 窗口移动自动有效。 */
+
+function uiBoundsNearCat(): Electron.Rectangle {
+  const base = computeUiBounds(); // w/h 小屏钳制 + 无猫窗时的兜底角落锚点
+  if (!catWin || catWin.isDestroyed()) return base;
+  const cb = catWin.getBounds();
+  const { workArea: wa } = screen.getDisplayMatching(cb);
+  let x = cb.x + cb.width;                                     // 猫右侧：⚡ 按钮紧邻猫
+  if (x + base.width > wa.x + wa.width) x = cb.x - base.width; // 放不下 → 翻到猫左侧
+  x = Math.min(Math.max(x, wa.x), Math.max(wa.x, wa.x + wa.width - base.width));
+  let y = cb.y + cb.height - base.height;                      // 与猫脚对齐
+  y = Math.min(Math.max(y, wa.y), Math.max(wa.y, wa.y + wa.height - base.height));
+  return { x: Math.round(x), y: Math.round(y), width: base.width, height: base.height };
+}
+
+function syncUiToCat(force = false): void {
+  if (!uiWin || uiWin.isDestroyed()) return;
+  const t = uiBoundsNearCat();
+  const cur = uiWin.getBounds();
+  if (!force && t.x === cur.x && t.y === cur.y) return;
+  uiWin.setBounds(t);
+}
+
+/** 跟随节流：行走/拖拽逐帧发 cat:moveWindow，setBounds 限 ~30fps；
+ *  尾部 debounce 保证停下来后精确对齐（不受节流空窗影响）。 */
+let uiFollowLastAt = 0;
+let uiFollowTrail: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleUiFollow(): void {
+  const now = Date.now();
+  if (now - uiFollowLastAt >= 33) {
+    uiFollowLastAt = now;
+    syncUiToCat();
+  }
+  if (uiFollowTrail) clearTimeout(uiFollowTrail);
+  uiFollowTrail = setTimeout(() => { uiFollowTrail = null; syncUiToCat(); }, 80);
+}
+
 /* ─────────────────────────── 窗口 ─────────────────────────── */
 
 function commonWebPreferences(): Electron.WebPreferences {
@@ -253,9 +297,11 @@ function react(reaction: string, text?: string): void {
 }
 
 /**
- * uiWin 显隐同步：领域状态需要 UI（卡片/调节窗/周报/推荐/面板）或渲染层
- * 本地 hint（恢复扇形/周报查看）→ show；全部结束 → hide。
- * 面板模式额外 focus（用户明确要操作面板）。
+ * uiWin 显隐同步：用户裁定 2026-10-27 —— ⚡ 精力恢复功能按钮常驻 uiWin 左侧，
+ * 窗口从此**常驻可见**（全透明；点击穿透完全由 hotRects 轮询决定，空闲时只有
+ * ⚡ 按钮占据命中区，其余区域照常穿透）。
+ * needUi 语义保留：驱动猫侧「安静陪伴」（卡片活跃暂停自主散步）；
+ * 面板模式额外 focus 由 applyModeToWindow 负责。
  */
 function syncUiVisibility(): void {
   if (!uiWin || uiWin.isDestroyed()) return;
@@ -266,15 +312,13 @@ function syncUiVisibility(): void {
       || (st.recommendations?.length ?? 0) > 0
     )
   ) || uiHintActive;
-  if (needUi && !uiWin.isVisible()) {
+  if (!uiWin.isVisible()) {
     uiWin.showInactive(); // 不抢焦点；panel 模式的 focus 由 applyModeToWindow 负责
     // 刚显示的窗口需要立刻可点：给命中区上报一个宽限窗
     forcedInteractiveUntil = Math.max(forcedInteractiveUntil, Date.now() + 400);
-  } else if (!needUi && uiWin.isVisible()) {
-    uiWin.hide();
-    setUiIgnore(true);
-    hotRects = [];
   }
+  // 不再隐藏（旧 else 分支 hide + setUiIgnore(true) + 清 hotRects 已删除）：
+  // 常驻 ⚡ 按钮要求窗口始终在屏；穿透与否交给 hotRects 轮询逐点判定。
   // 猫侧「安静陪伴」：UI 卡片出现时暂停自主散步，收起后恢复
   if (needUi !== lastNeedUi) {
     lastNeedUi = needUi;
@@ -293,6 +337,7 @@ let lastNeedUi = false;
  * 主进程 50ms 轮询光标判断命中，避免 forward:true 高频切换的 macOS SIGABRT。
  */
 let hotRects: HotRect[] = [];          // uiWin 命中区
+let rectsReported = false;             // 渲染层是否上报过（空数组 = 空闲无常驻按钮，属正常态，整窗穿透）
 let uiIgnoring = true;
 let catIgnoring = true;
 let catHotRects: HotRect[] = [];       // 猫体 + 精力 HUD 命中区（渲染层上报前用默认值兜底）
@@ -330,10 +375,12 @@ function setCatIgnore(ignore: boolean): void {
 
 function isCursorOverUiHotRect(): boolean {
   if (!uiWin || uiWin.isDestroyed() || !uiWin.isVisible()) return false;
-  // 兜底：一个命中区都没有说明上报链路出了问题。此时宁可让底部区域可点，
-  // 也不能全窗口穿透——「应用完全不可操作」比「偶尔挡一点桌面」严重得多。
   const b = uiWin.getBounds();
-  const rects = hotRects.length > 0 ? hotRects : fallbackHotRects(b.width, b.height);
+  // 兜底仅限「渲染层从未上报」（启动预热/上报链路故障）：宁可让底部区域可点，
+  // 也不能全窗口穿透——「应用完全不可操作」比「偶尔挡一点桌面」严重得多。
+  // 已上报过且为空 = 空闲常态（⚡ 入口在猫 HUD，本窗口无常驻按钮，用户裁定
+  // 2026-10-27）：整窗穿透，不启用兜底区、不告警。
+  const rects = hotRects.length > 0 || rectsReported ? hotRects : fallbackHotRects(b.width, b.height);
   const pt = screen.getCursorScreenPoint();
   return pointInRects(pt.x - b.x, pt.y - b.y, rects, b.width, b.height);
 }
@@ -417,6 +464,22 @@ function poseSubmenu(): Electron.MenuItemConstructorOptions[] {
   return items;
 }
 
+/** 任务面板入口（右键菜单 / HUD 快捷按钮共用）：panel 模式 + uiWin 展开并聚焦 */
+function openTasksPanel(): void {
+  coordinator?.setMode('panel');
+  applyModeToWindow('panel');
+  syncUiVisibility();
+  sendToUi('ui:cmd', { type: 'openPanel' });
+  flushState();
+}
+
+/** 精力恢复扇形入口（右键菜单 / HUD 快捷按钮共用）：扇形是 uiWin 渲染层本地 UI，
+ *  主进程看不见 → 先 ensureUiShown 保窗口可见，随后由渲染层 uiHint(true) 维持 */
+function openRecoveryMenu(): void {
+  ensureUiShown();
+  sendToUi('ui:cmd', { type: 'openRecovery' });
+}
+
 /**
  * 猫右键菜单：每次弹出时重建（Menu.popup 一次性，不存在托盘 setContextMenu
  * 的 SIGABRT 风险），因此可以携带动态信息（精力一句话/暂停状态/开关勾选）。
@@ -428,23 +491,8 @@ function popupCatMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     { label: headline, enabled: false },
     { type: 'separator' },
-    {
-      label: '任务面板',
-      click: () => {
-        coordinator?.setMode('panel');
-        applyModeToWindow('panel');
-        syncUiVisibility();
-        sendToUi('ui:cmd', { type: 'openPanel' });
-        flushState();
-      },
-    },
-    {
-      label: '恢复一下',
-      click: () => {
-        ensureUiShown();
-        sendToUi('ui:cmd', { type: 'openRecovery' });
-      },
-    },
+    { label: '任务面板', click: () => openTasksPanel() },
+    { label: '恢复一下', click: () => openRecoveryMenu() },
     {
       label: '本周报告',
       click: () => {
@@ -583,12 +631,12 @@ function createTray(): void {
    */
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开 / 收起面板', click: toggleMode },
-    { label: '刷新天气', click: () => { void coordinator?.weather.refresh().then(() => { flushState(); pushMood(); }); } },
+    { label: '刷新天气', click: () => { void coordinator?.refreshWeather(); } },
     {
       label: '猫回地面',
       click: () => {
         sendToCat('cat:cmd', { type: 'go-ground' });
-        if (uiWin && !uiWin.isDestroyed()) uiWin.setBounds(computeUiBounds());
+        syncUiToCat(true); // 立即贴回猫旁；落地过程由 moveWindow 跟随兜住
       },
     },
     { type: 'separator' },
@@ -640,6 +688,7 @@ function registerIpc(): void {
   // 命中区上报（uiWin）：渲染进程布局变化时推送可交互元素包围盒（窗口内 DIP 坐标）
   ipcMain.on('win:hotRects', (_e, payload: HotRect[]) => {
     hotRects = sanitizeRects(payload);
+    rectsReported = true; // 空数组自此 = 空闲常态（整窗穿透），不再触发兜底/告警
     if (hotRects.length > 0 && warnedEmptyRects) {
       // 之前触发过兜底，现在拿到真实命中区了 —— 记录恢复，并允许下次异常再告警
       logCrash('hotRects recovered', { count: hotRects.length });
@@ -681,6 +730,9 @@ function registerIpc(): void {
     helpers?.startKeytap();
     startHitTestLoop();
     pushMood();
+    // UI 窗初始锚定到猫旁（此后随 cat:moveWindow 跟随）
+    syncUiToCat(true);
+    console.log('[ui-follow] 初始锚定 ui=%j cat=%j', uiWin?.getBounds(), catWin?.getBounds());
   });
 
   ipcMain.handle('cat:getLayout', (): CatLayout => catLayout());
@@ -691,6 +743,7 @@ function registerIpc(): void {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     catDragLastAt = Date.now();
     catWin.setPosition(Math.round(x), Math.round(y), false);
+    scheduleUiFollow(); // 功能按钮跟着桌宠走（节流 + 尾部对齐）
   });
 
   ipcMain.handle('cat:getSkin', () => {
@@ -702,6 +755,12 @@ function registerIpc(): void {
 
   ipcMain.on('cat:showMenu', () => popupCatMenu());
   ipcMain.on('cat:openAccessibility', () => helpers?.openAccessibilitySettings());
+
+  // HUD 快捷按钮：任务面板 / 精力恢复扇形（与右键菜单同一入口，v1.x dock 的回归）
+  ipcMain.on('cat:openEntry', (_e, entry: string) => {
+    if (entry === 'tasks') openTasksPanel();
+    else if (entry === 'recovery') openRecoveryMenu();
+  });
 
   // 拖拽期间保持可交互（含 mouseup 丢失的超时保护，见轮询）
   ipcMain.on('cat:dragActive', (_e, active: boolean) => {
@@ -798,9 +857,9 @@ function registerIpc(): void {
     return c()?.ledger.current() ?? 0;
   });
 
-  // 天气
+  // 天气（手动刷新走 refreshWeather 唯一入口：bus 事件负责重推 state/心情/按需吐槽）
   ipcMain.handle('weather:refresh', async () => {
-    const w = await (c()?.weather.refresh() ?? Promise.resolve(null));
+    const w = await (c()?.refreshWeather() ?? Promise.resolve(null));
     flushState();
     return w;
   });
@@ -814,6 +873,8 @@ function registerIpc(): void {
 
   // 周报
   ipcMain.handle('insight:weeklyReport', () => c()?.weeklyReport() ?? null);
+  // 每日复盘清单（17:30 弹窗日常内容；周五确认弹窗仍走周报）
+  ipcMain.handle('insight:dailyRecap', () => c()?.dailyRecap() ?? null);
   // 周报弹窗确认/关闭（每天 17:30 弹一次，周五需确认）
   ipcMain.handle('report:confirm', () => { c()?.confirmReport(); flushState(); return true; });
 
@@ -823,9 +884,9 @@ function registerIpc(): void {
   // 应用
   ipcMain.handle('app:quit', () => { quitting = true; app.quit(); return true; });
   ipcMain.handle('app:reposition', () => {
-    // 猫回地面默认位 + UI 窗口回右下角
+    // 猫回地面默认位 + UI 窗口贴回猫旁
     sendToCat('cat:cmd', { type: 'go-ground' });
-    if (uiWin && !uiWin.isDestroyed()) uiWin.setBounds(computeUiBounds());
+    syncUiToCat(true);
     return true;
   });
 }
@@ -848,7 +909,15 @@ function subscribeCoordinator(): void {
     if (prev >= 3 && e < 3) react('low-energy');
     else if (prev < 8 && e >= 8) react('energized');
   });
-  bus.on('weather:changed', () => { flushState(); react('weather'); });
+  // 实时天气 → 猫心情：pushMood 重推 cat:mood（JSON 去重），头顶天气挂件
+  // （≥8 精力+晴=太阳 / <8 精力+雨雷=小雨/闪电，门槛在 resolveWeatherOverlay 唯一入口）
+  // 随用户实时天气即时更新。先 pushMood 再 react：渲染层吐槽文案取的是新 mood 的天气。
+  // changed=false（30min 例行刷新没变天）只静默同步状态，不打扰用户。
+  bus.on('weather:changed', (p) => {
+    flushState();
+    pushMood();
+    if (p.changed) react('weather');
+  });
   bus.on('task:changed', () => flushState());
   bus.on('recovery:changed', () => flushState());
   bus.on('slide:requested', (p) => {
@@ -906,6 +975,40 @@ function setupSelftestClick(): void {
         const alive = !!catWin && !catWin.isDestroyed() && !wc.isDestroyed();
         if (!alive) { fail('process died after click simulation'); return; }
         const r2 = await wc.executeJavaScript('document.getElementById("stage") ? "canvas-ok" : "canvas-missing"');
+
+        // 4) HUD 快捷按钮全链路：🎛️ 任务面板 → uiWin panel 展开；⚡ 精力恢复 → 扇形弹出且面板互斥收起
+        if (uiWin && !uiWin.isDestroyed() && uiWin.webContents.isLoading()) {
+          await Promise.race([
+            new Promise<void>((res) => { uiWin!.webContents.once('did-finish-load', () => res()); }),
+            new Promise<void>((res) => setTimeout(() => res(), 3000)),
+          ]);
+        }
+        const uiProbe = async (expr: string): Promise<boolean> =>
+          !!(uiWin && !uiWin.isDestroyed() && await uiWin.webContents.executeJavaScript(expr));
+        const r3 = await wc.executeJavaScript(`(() => {
+          window.dispatchEvent(new MouseEvent('mousemove', { clientX: 180, clientY: 300, bubbles: true }));
+          const b = document.getElementById('hud-panel');
+          if (!b) return 'missing';
+          b.click();
+          return 'clicked';
+        })()`);
+        await new Promise((res) => setTimeout(res, 500));
+        const panelOpen = await uiProbe('!!document.getElementById("panel")?.classList.contains("open")');
+        if (r3 !== 'clicked' || !panelOpen) { fail(`HUD 任务按钮链路失败 click=${r3} panelOpen=${panelOpen}`); return; }
+        const r4 = await wc.executeJavaScript(`(() => {
+          const b = document.getElementById('hud-recovery');
+          if (!b) return 'missing';
+          b.click();
+          return 'clicked';
+        })()`);
+        await new Promise((res) => setTimeout(res, 500));
+        const recOpen = await uiProbe('!!document.getElementById("recovery-pop")?.classList.contains("show")');
+        const panelClosed = !(await uiProbe('!!document.getElementById("panel")?.classList.contains("open")'));
+        if (r4 !== 'clicked' || !recOpen || !panelClosed) {
+          fail(`HUD 恢复按钮链路失败 click=${r4} recOpen=${recOpen} panelClosed=${panelClosed}`);
+          return;
+        }
+        console.log('[selftest-click] hudEntries: tasks→panel ✓ recovery→fan ✓ (面板互斥收起 ✓)');
         console.log(`[selftest-click] click=${r1} toggle25=ok render=${r2} alive=${alive}`);
         quitting = true;
         app.quit();
@@ -991,8 +1094,8 @@ function setupSelfcheck(): void {
           + 'JSON.stringify({ skin: !!(window.petDebug && window.petDebug.exprLoaded && window.petDebug.exprLoaded()),'
           + ' state: window.petDebug ? window.petDebug.state() : null,'
           + ' hudNum: (document.getElementById("hud-num") || {}).textContent,'
-          + ' hudTier: (document.getElementById("hud-tier") || {}).textContent,'
           + ' hudCells: document.querySelectorAll("#hud-cells .cell").length,'
+          + ' hudBtns: document.querySelectorAll("#energy-hud .hud-btn").length,'
           + ' hudShown: !!(document.getElementById("energy-hud") || { classList: { contains() { return false; } } }).classList.contains("show") })',
         );
         console.log(`[selfcheck] cat info=${catInfo}`);
@@ -1132,11 +1235,11 @@ if (!gotLock) {
     pushMood();
     syncUiVisibility();
 
-    // 显示器/分辨率变化：推新布局给猫 + 重算 ledge + UI 窗口回右下角
+    // 显示器/分辨率变化：推新布局给猫 + 重算 ledge + UI 窗重新贴到猫旁
     screen.on('display-metrics-changed', () => {
       sendToCat('cat:cmd', { type: 'layout', layout: catLayout() });
       helpers?.invalidateWinlist();
-      if (uiWin && !uiWin.isDestroyed()) uiWin.setBounds(computeUiBounds());
+      syncUiToCat(true);
     });
 
     app.on('activate', () => {

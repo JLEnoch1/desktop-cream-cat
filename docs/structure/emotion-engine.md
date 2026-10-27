@@ -11,7 +11,7 @@
  * 职责边界：纯函数，无副作用无 IO。
  *   base    10 档精力状态表      → 主体表情
  *   weather 独立 overlay 精灵    → 锚定头顶，不参与表情状态机
- *   pulse   日志驱动的瞬时反应   → 精力 < PULSE_THRESHOLD 时激活
+ *   pulse   日志驱动的瞬时反应   → 全档激活（门槛已废除，强度由 pulse-contract 调制）
  */
 
 /* ── base 层 ── */
@@ -39,7 +39,7 @@ export const BASE_TIERS: readonly BaseTier[];
 export const WARM_HUE_MIN = 30;   // 🆕 v1.2 导出（engine.ts:40）。R7 守护锚点：
 export const WARM_HUE_MAX = 46;   //    任何档位 hue 不得落在此区间外（禁蓝紫病态色）
 
-export const PULSE_THRESHOLD = 3;   // ⚠️ pulse 激活阈值 = 精力 < 3（非注释所称 6），见 [问题清单](known-issues.md)
+~~export const PULSE_THRESHOLD = 3~~ 已废除（2026-10-22 Q1 裁决），pulse 全档激活；调制见 [emotion-pulse-contract.md](emotion-pulse-contract.md)
                                     // 🔴 红线常量，勿自行调整（DESIGN.md §4.3）
 
 export function tierFor(energy: number): BaseTier;
@@ -65,7 +65,7 @@ export const COMPOSITE_TABLE: Record<WeatherCondition, Record<EnergyBand, Compos
 // ⟨4×3 全覆盖。语义：同样下雨，精力高是「惬意听雨(cozy)」，精力低是「雪上加霜(soaked)」⟩
 
 export function energyBand(energy: number): EnergyBand;
-// ⟨>=6.5 high；>=3 mid；否则 low。low 与 PULSE_THRESHOLD(3) 对齐⟩
+// ⟨>=6.5 high；>=3 mid；否则 low。low(<3) 是 composite 查表用的独立分档，与已废除的 pulse 门槛无关⟩
 
 export const MODIFIER_LABEL: Record<CompositeModifier, string>;
 
@@ -109,7 +109,7 @@ export interface ResolveInput {
 }
 
 export function resolve(input: ResolveInput): EmotionState;
-// ⟨三层合成主入口。pulseActive = energy < PULSE_THRESHOLD；
+// ⟨三层合成主入口。pulseActive 恒 true（门槛已废除，字段保留以维持 EmotionState 形状）；
 //   headline 取 pulse headline，无则取 base tier headline⟩
 
 export function buildComposite(

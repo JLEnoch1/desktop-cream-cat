@@ -12,7 +12,7 @@
  * 渲染层（sprite-skin / fallback-cat）只负责把 pose 画出来。
  */
 
-import type { CatCmd, CatLedge, CatLayout } from '../../core/types.js';
+import type { CatCmd, CatLedge, CatLayout, CustomPoseDef } from '../../core/types.js';
 import type { MoodParams } from './mood.js';
 import { NEUTRAL_MOOD } from './mood.js';
 
@@ -25,7 +25,8 @@ export const CAT_CX = CAT_W / 2;
 
 export type CatState =
   | 'idle' | 'walk' | 'groom' | 'pet' | 'sleep'
-  | 'drag' | 'thrown' | 'climb' | 'perch' | 'fall';
+  | 'drag' | 'thrown' | 'climb' | 'perch' | 'fall'
+  | 'pose';
 
 export type PerchMode = 'stand' | 'walk' | 'look';
 
@@ -68,11 +69,101 @@ export interface FsmHooks {
   petLines(): string[];
 }
 
+/* ─────────────────── 自定义姿势（姿势插件）纯函数 ─────────────────── */
+
+/** 姿势进/出包络：0.22s 淡入 / 0.28s 淡出，峰值 1（短姿势两坡相接自然衰减） */
+export function poseEnv(stT: number, duration: number): number {
+  return Math.min(1, stT / 0.22) * Math.min(1, Math.max(0, (duration - stT) / 0.28));
+}
+
+/**
+ * 把自定义姿势的覆盖与二级动画施加到基础 pose 上（纯函数，可单测）。
+ *  - 数值字段随 env 从当前值插值到目标值 → 进/出无硬切
+ *  - 枚举/布尔字段在 env≥0.5（过半程）时切换，收尾前还原
+ *  - anim 是 t 的正弦扰动，幅度乘 env；bounce 联动 sx 做体积近似守恒
+ */
+export function applyCustomPose(p: CatPose, def: CustomPoseDef, env: number, t: number): void {
+  const o = def.pose;
+  if (o) {
+    const mix = (cur: number, target: number | undefined): number =>
+      target == null ? cur : cur + (target - cur) * env;
+    p.sx = mix(p.sx, o.sx);
+    p.sy = mix(p.sy, o.sy);
+    p.rot = mix(p.rot, o.rot);
+    p.pawL = mix(p.pawL, o.pawL);
+    p.pawR = mix(p.pawR, o.pawR);
+    p.splay = mix(p.splay, o.splay);
+    p.tailAmp = mix(p.tailAmp, o.tailAmp);
+    p.headTilt = mix(p.headTilt, o.headTilt);
+    p.earL = mix(p.earL, o.earL);
+    p.earR = mix(p.earR, o.earR);
+    if (env >= 0.5) {
+      if (o.eyes) p.eyes = o.eyes;
+      if (o.mouth) p.mouth = o.mouth;
+      if (o.legsOn != null) p.legsOn = o.legsOn;
+      if (o.tailWrap != null) p.tailWrap = o.tailWrap;
+      if (o.zzz != null) p.zzz = o.zzz;
+      if (o.blush != null) p.blush = o.blush;
+    }
+  }
+  const a = def.anim;
+  if (a && env > 0) {
+    if (a.swayAmp) p.rot += Math.sin(t * (a.swayFreq ?? 2) * Math.PI * 2) * a.swayAmp * env;
+    if (a.bounceAmp) {
+      const b = Math.sin(t * (a.bounceFreq ?? 2) * Math.PI * 2) * a.bounceAmp * env;
+      p.sy *= 1 + b;
+      p.sx *= 1 - b * 0.6;
+    }
+  }
+}
+
 interface Climb {
   x0: number; y0: number;
   x1: number; y1: number;
   T: number; arch: number; t: number;
   id: number | string;
+}
+
+/* ─────────────────── 精力外化（vitality）纯函数 ───────────────────
+ * 「宠物的精力变化绑定宠物外化变化」：vitality(0–1) 是能量派生的姿态
+ * 单一输入——低精力瘫软下沉/垂头/步态无弹跳/耳尾耷拉（走不动、情绪低落），
+ * 高精力挺拔/弹跳步/耳尾有神（情绪高涨）。全部经 vit 平滑后才进 pose，
+ * 于是每次消耗/恢复都被「记在身上」：肉眼可见地低落下去 / 高涨起来。 */
+
+/** 活力平滑时间常数（s）：~0.55s 可见过渡（太快=瞬变无感，太慢=拖泥带水） */
+export const VITALITY_TAU = 0.55;
+
+/** 指数平滑趋近（帧率无关）：精力目标变化 → 姿态连续过渡，绝不跳变 */
+export function approachVitality(cur: number, target: number, dt: number): number {
+  const t = Math.max(0, Math.min(1, target));
+  return cur + (t - cur) * (1 - Math.exp(-dt / VITALITY_TAU));
+}
+
+export interface VitalityPoseMods {
+  /** 整体纵向缩放：低精力瘫软下沉 10%，高精力挺拔微弹 */
+  syScale: number;
+  /** 向前耷拉 rad（乘 face）：垂头丧气，随活力回升归零 */
+  droopRot: number;
+  /** 耳朵下垂量（0=竖直 → 0.18=微耷；线稿回退猫通道，图像皮肤无此自由度） */
+  earDroop: number;
+  /** 尾巴摆幅倍率：低精力无力垂摆，高精力神气摇摆 */
+  tailScale: number;
+  /** 行走踏步弹跳幅度（sy 正弦）：低=拖步无弹跳，高=轻快弹跳 */
+  bounce: number;
+}
+
+/** vitality(0–1) → 姿态外化量（纯函数，可单测；全部线性，跨档无跳变）。
+ *  v=1 锚定旧基线（syScale/tailScale=1、droop/earDroop=0）：满精力与领域未就绪
+ *  （NEUTRAL_MOOD）时皮肤零改变，外化只在「低落方向」下沉 + 步态弹跳略超基线。 */
+export function vitalityPoseMods(vit: number): VitalityPoseMods {
+  const v = Math.max(0, Math.min(1, vit));
+  return {
+    syScale: 0.9 + 0.1 * v,
+    droopRot: (1 - v) * 0.09, // ≈5.2°，对齐原版 fx-droop 的 -4°~-7°
+    earDroop: (1 - v) * 0.18,
+    tailScale: 0.45 + 0.55 * v,
+    bounce: 0.006 + 0.02 * v,
+  };
 }
 
 const rand = (a: number, b: number): number => a + Math.random() * (b - a);
@@ -90,6 +181,10 @@ export class CatFsm {
   st: CatState = 'idle';
   stT = 0;
   dir = 1;
+  /** 当前平滑步速(px/s)：地面/顶边共用，报给步态引擎锁步频，消除启停/转向速度跳变 */
+  private walkV = 0;
+  /** 平滑后的活力(0–1)：目标 = moodParams.vitality（有效精力派生），过渡走 approachVitality */
+  private vit = 1;
   private walkDur = 0;
   private nextWalkIn = rand(2.5, 5);
   private nextGroomIn = rand(8, 16);
@@ -134,6 +229,14 @@ export class CatFsm {
   /** UI 卡片窗口打开期间：停止自主散步（安静陪伴），互动照常响应 */
   uiHold = false;
 
+  /* ── 自定义姿势（姿势插件）── */
+  private poseDef: CustomPoseDef | null = null;
+
+  /** pose 状态下皮肤帧源（def.useState，缺省 idle）；非 pose 状态返回 null */
+  get poseSkinState(): string | null {
+    return this.st === 'pose' ? this.poseDef?.useState ?? 'idle' : null;
+  }
+
   layout: CatLayout | null = null;
 
   constructor(private readonly hooks: FsmHooks) {}
@@ -163,6 +266,7 @@ export class CatFsm {
     this.stT = 0;
     this.perchMode = mode;
     this.perchT = 0;
+    if (mode !== 'walk') this.walkV = 0; // 离开顶边行走即清零步速，下次起步从 0 渐入
     if (mode === 'walk') this.perchWalkDur = rand(1.5, 3.5);
     if (mode === 'look') this.lookDur = rand(2, 4);
     this.nextPerchIn = rand(4, 10);
@@ -240,6 +344,7 @@ export class CatFsm {
   /* ─────────────────────────── 状态切换 ─────────────────────────── */
 
   set(name: CatState, dur?: number): void {
+    if (name !== 'pose') this.poseDef = null; // 离开姿势态即弃 def（拖拽/甩出可打断）
     this.st = name;
     this.stT = 0;
     const m = this.mood;
@@ -247,7 +352,10 @@ export class CatFsm {
       this.nextWalkIn = rand(3.5, 7) / m.activity;
       this.nextGroomIn = rand(9, 20) / m.activity;
     }
-    if (name === 'walk') this.walkDur = dur ?? rand(1.8, 4.2);
+    if (name === 'walk') {
+      // 步行时长随活力缩放：低精力 = 勉强挪几步（~0.5×），高精力 = 昂首走远路（至 ~1.17×）
+      this.walkDur = (dur ?? rand(1.8, 4.2)) * (0.45 + 0.55 * Math.min(1.3, m.activity));
+    }
     if (name === 'groom') this.groomSide = Math.random() < 0.5 ? -1 : 1;
   }
 
@@ -263,6 +371,21 @@ export class CatFsm {
     }
   }
 
+  /**
+   * 播放自定义姿势（右键菜单「摆个姿势」/ play-pose 命令 / 调试把手）。
+   * 明确意图触发：睡眠中也会醒来摆（区别于自主行为）；paused 期间拒绝。
+   * def 已由主进程 sanitizePose 校验钳制，这里直接信任。
+   */
+  playPose(def: CustomPoseDef): boolean {
+    if (this.paused || !def) return false;
+    this.poseDef = def;
+    this.set('pose');
+    this.lastAct = performance.now(); // 摆完别立刻入睡
+    if (def.text) this.hooks.bubble(def.text, Math.round(clamp(def.duration * 900, 1200, 4200)));
+    if (def.expression) this.hooks.playExpr(def.expression);
+    return true;
+  }
+
   /* ─────────────────────────── 行为更新 ─────────────────────────── */
 
   update(dt: number): void {
@@ -276,6 +399,9 @@ export class CatFsm {
     this.blinkT = Math.max(0, this.blinkT - dt);
     this.pawTapT = Math.max(0, this.pawTapT - dt);
     this.squashT = Math.max(0, this.squashT - dt);
+    // 活力平滑：精力目标一变（消耗落库/恢复落库/调节预览拖动），姿态在 ~0.55s 内
+    // 连续过渡到低落或高涨——paused 期间也跟随（暂停的是行为，不是精力事实）
+    this.vit = approachVitality(this.vit, m.vitality, dt);
     if (!this.layout) return;
     const layout = this.layout;
 
@@ -299,12 +425,23 @@ export class CatFsm {
           const l = this.surface ? this.ledgeById(this.surface.id) : null;
           if (this.surface && !l) { this.startFall(); break; }
           this.legPh += dt * 10;
-          this.px += this.dir * this.currentSpeed() * dt;
           const lo = l ? l.x + 30 - CAT_W / 2 : this.walkMin();
           const hi = l ? l.x + l.w - 30 - CAT_W / 2 : this.walkMax();
-          if (this.px < lo) { this.px = lo; this.dir = 1; }
-          if (this.px > hi) { this.px = hi; this.dir = -1; }
-          if (this.stT > this.walkDur) this.set('idle');
+          // 速度包络：起步渐加速/结束前滑行/贴边预刹车 → 速度全程 C0 连续
+          //（原实现 0↔巡航 瞬变：起步一顿、急停打滑、边界瞬间反向）
+          const cruise = this.currentSpeed(); // 与报给步态引擎的速度一致（mood 驱动），顶边不再脚滑
+          const remain = this.walkDur - this.stT;
+          const edgeDist = Math.min(this.px - lo, hi - this.px);
+          let target = cruise;
+          if (remain < 0.45) target *= Math.max(0, remain / 0.45); // 结束前 0.45s 滑行到 0
+          if (edgeDist < 30) target *= Math.max(0, edgeDist / 30); // 到墙前减速再转身
+          // 不对称时间常数：加速缓(0.12s)、减速快(0.05s) → 滑行末端残速 ≈5px/s(0.08px/帧,不可感知)
+          const tau = target > this.walkV ? 0.12 : 0.05;
+          this.walkV += (target - this.walkV) * (1 - Math.exp(-dt / tau)); // 指数平滑,帧率无关
+          this.px += this.dir * this.walkV * dt;
+          if (this.px < lo) { this.px = lo; this.dir = 1; this.walkV = 0; } // 速度≈0 时才反向,配合转身溶解
+          if (this.px > hi) { this.px = hi; this.dir = -1; this.walkV = 0; }
+          if (this.stT > this.walkDur) { this.walkV = 0; this.set('idle'); }
           break;
         }
         case 'groom':
@@ -313,13 +450,21 @@ export class CatFsm {
         case 'pet':
           if (this.stT > 1.1) this.set('idle');
           break;
+        case 'pose': {
+          // 自定义姿势：定时播放后回 idle；legsOn 覆盖时原地慢踏腿
+          const d = this.poseDef;
+          if (d?.pose?.legsOn) this.legPh += dt * 6;
+          if (!d || this.stT >= d.duration) this.set('idle');
+          break;
+        }
         case 'climb': {
           const climb = this.climb;
           if (!climb) { this.set('idle'); break; }
           climb.t += dt;
           const k = Math.min(1, climb.t / climb.T);
-          this.px = climb.x0 + (climb.x1 - climb.x0) * k;
-          this.py = climb.y0 + (climb.y1 - climb.y0) * k - Math.sin(Math.PI * k) * climb.arch;
+          const ks = k * k * (3 - 2 * k); // smoothstep：起跳/落点速度为 0，衔接不硬折
+          this.px = climb.x0 + (climb.x1 - climb.x0) * ks;
+          this.py = climb.y0 + (climb.y1 - climb.y0) * ks - Math.sin(Math.PI * ks) * climb.arch;
           this.legPh += dt * 14;
           if (k >= 1) {
             const l = this.ledgeById(climb.id);
@@ -344,10 +489,18 @@ export class CatFsm {
           this.perchT += dt;
           if (this.perchMode === 'walk') {
             this.legPh += dt * 10;
-            this.px += this.dir * this.currentSpeed() * dt;
-            if (this.px <= lo) { this.px = lo; this.dir = 1; this.setPerch('look'); }
-            else if (this.px >= hi) { this.px = hi; this.dir = -1; this.setPerch('look'); }
-            else if (this.perchT > this.perchWalkDur) this.setPerch('stand');
+            // 与地面走同一套速度包络：结束前滑行 + 贴边刹车，到边时速度已≈0 再转 look
+            const remain = this.perchWalkDur - this.perchT;
+            const edgeDist = Math.min(this.px - lo, hi - this.px);
+            let target = this.currentSpeed();
+            if (remain < 0.45) target *= Math.max(0, remain / 0.45);
+            if (edgeDist < 30) target *= Math.max(0, edgeDist / 30);
+            const tau = target > this.walkV ? 0.12 : 0.05;
+            this.walkV += (target - this.walkV) * (1 - Math.exp(-dt / tau));
+            this.px += this.dir * this.walkV * dt;
+            if (this.px <= lo) { this.px = lo; this.dir = 1; this.walkV = 0; this.setPerch('look'); }
+            else if (this.px >= hi) { this.px = hi; this.dir = -1; this.walkV = 0; this.setPerch('look'); }
+            else if (this.perchT > this.perchWalkDur) { this.walkV = 0; this.setPerch('stand'); }
           } else if (this.perchMode === 'look') {
             if (this.perchT > this.lookDur) this.setPerch('stand');
           } else if (this.stT > this.nextPerchIn && !this.uiHold) {
@@ -439,12 +592,27 @@ export class CatFsm {
     }
   }
 
-  /** 当前移速（步态引擎速度同步用）：地面 walk 全速，顶边踱步略慢 */
+  /** 当前巡航移速（速度包络的目标值）：地面 walk 全速，顶边踱步略慢 */
   currentSpeed(): number {
     const m = this.mood;
     if (this.st === 'walk') return this.surface ? m.walkSpeed * 0.87 : m.walkSpeed;
     if (this.st === 'perch' && this.perchMode === 'walk') return m.walkSpeed * 0.87;
     return 0;
+  }
+
+  /** 真实平滑步速（包络后的 walkV）：报给步态引擎锁步频——加减速阶段步频随位移锁定，报巡航值会脚滑 */
+  currentVelocity(): number {
+    return this.walkV;
+  }
+
+  /** 平滑后的活力(0–1)：精力外化观测口（单测/devtools/探针；目标 = moodParams.vitality） */
+  vitality(): number {
+    return this.vit;
+  }
+
+  /** 窗口只能整数步进(Math.round)，亚像素余量交给画布层补偿 → 消除 0/1px 交替微跳 */
+  subX(): number {
+    return this.px - Math.round(this.px);
   }
 
   /* ─────────────────────────── pose ─────────────────────────── */
@@ -466,10 +634,12 @@ export class CatFsm {
     // 呼吸：周期走情绪 tier（疲惫呼吸更沉），幅度随活力微增
     const breathFreq = this.st === 'sleep' ? 1.2 : (Math.PI * 2) / Math.max(0.8, m.breathPeriod);
     p.sy *= 1 + Math.sin(this.t * breathFreq) * (0.014 + 0.006 * Math.min(1, m.activity));
+    // 精力外化（vitality 单一来源，经 vit 平滑）：姿态量先算好，各状态引用
+    const vm = vitalityPoseMods(this.vit);
     switch (this.st) {
       case 'walk':
       case 'climb':
-        p.legsOn = true; p.tailAmp = 1.5; p.sy *= 1 + Math.sin(this.legPh * 2) * 0.02;
+        p.legsOn = true; p.tailAmp = 1.5; p.sy *= 1 + Math.sin(this.legPh * 2) * vm.bounce;
         break;
       case 'perch':
         if (this.perchMode === 'walk') { p.legsOn = true; p.tailAmp = 1.5; }
@@ -484,11 +654,16 @@ export class CatFsm {
         p.headTilt = 0.22 * this.groomSide; p.eyes = 'closed'; p.tailAmp = 0.5;
         break;
       case 'sleep':
-        p.sy *= 0.74; p.headTilt = 0.28; p.eyes = 'closed'; p.mouth = 'line';
+        // 不再 p.sy *= 0.74（用户反馈 2026-10-27：图像皮肤 sleep 帧已是卧姿，再纵向压缩整体变扁不和谐；
+        // 0.74 是原版程序化猫的蜷缩画法，回退渲染器在 cat-app 侧自行补偿）
+        p.headTilt = 0.28; p.eyes = 'closed'; p.mouth = 'line';
         p.tailWrap = true; p.tailAmp = 0.12; p.zzz = true;
         break;
       case 'pet':
         p.eyes = 'happy'; p.blush = true; p.rot = Math.sin(this.stT * 20) * 0.05; p.tailAmp = 2.2;
+        break;
+      case 'pose':
+        if (this.poseDef) applyCustomPose(p, this.poseDef, poseEnv(this.stT, this.poseDef.duration), this.t);
         break;
       case 'drag':
         p.splay = 1; p.eyes = 'wide'; p.mouth = 'o'; p.tailAmp = 2.4; p.tailPh = this.t * 10;
@@ -502,6 +677,18 @@ export class CatFsm {
     else if (this.st === 'idle') {
       if (this.t % 4.7 < 0.16) p.earR = 0.6; // 偶尔抖耳，显得警觉
       if (this.t % 6.1 < 0.14) p.earL = 0.6;
+    }
+    // 精力外化姿态（vm = vitalityPoseMods(this.vit)，已在 switch 前算好）：
+    // 整体瘫软下沉、尾巴无力垂摆、耳朵耷拉；垂头（前倾）只在地面平静态叠加，
+    // 拖拽/甩出/坠落/攀爬各有自己的身体朝向，不叠加。
+    // 睡眠例外（用户要求 2026-10-27）：睡姿保持基础蜷缩，不再叠加 vitality 压缩——身体变更小不和谐
+    if (this.st !== 'sleep') p.sy *= vm.syScale;
+    p.tailAmp *= vm.tailScale;
+    // 耳朵耷拉取 max：飞机耳(0.55)/警觉抖耳(0.6) 优先于低精力耷拉
+    p.earL = Math.max(p.earL, vm.earDroop);
+    p.earR = Math.max(p.earR, vm.earDroop);
+    if (this.st === 'idle' || this.st === 'walk' || this.st === 'perch' || this.st === 'groom') {
+      p.rot += p.face * vm.droopRot;
     }
     if (this.pawTapT > 0 && this.st !== 'drag' && this.st !== 'thrown') {
       if (this.pawSide < 0) p.pawL = Math.max(p.pawL, 0.95); else p.pawR = Math.max(p.pawR, 0.95);
@@ -557,6 +744,7 @@ export class CatFsm {
       this.dragStart.y = e.screenY;
       this.lastMoveT = performance.now();
       this.vel.x = 0; this.vel.y = 0;
+      this.walkV = 0;
       if (this.st !== 'thrown') this.set('drag');
       this.lastAct = performance.now();
       this.hooks.setDragActive(true);
@@ -670,6 +858,9 @@ export class CatFsm {
       case 'ui-hold':
         this.uiHold = d.active;
         if (d.active) this.lastAct = performance.now(); // 卡片打开期间先别睡
+        break;
+      case 'play-pose':
+        this.playPose(d.pose);
         break;
       case 'skins-updated':
         break; // cat-app 处理

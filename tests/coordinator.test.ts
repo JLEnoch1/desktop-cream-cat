@@ -11,7 +11,8 @@ import { join } from 'node:path';
 
 import { Coordinator, ADJUST_WINDOW_MS, ADJUST_WINDOW_HARD_MAX_MS } from '../src/main/coordinator.js';
 import { recoveryTakenDraft } from '../src/core/events.js';
-import type { RecoveryItem } from '../src/core/types.js';
+import type { RecoveryItem, WeatherCondition } from '../src/core/types.js';
+import type { BusPayloads } from '../src/core/bus.js';
 
 function makeCoordinator(): { c: Coordinator; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), 'energy-pet-coord-'));
@@ -496,4 +497,64 @@ test('coordinator: 周报载荷含 AI 推荐与已确认变更留痕', async () 
     assert.equal(dec!.source, 'user');
     assert.equal(dec!.delta, 2);
   } finally { (b.c as never as { __restoreNow?: () => void }).__restoreNow?.(); b.c.stop(); rmSync(b.dir, { recursive: true, force: true }); }
+});
+
+/* ─────────────────── 实时天气 → 心情广播（refreshWeather 唯一入口）───────────────────
+ * 守护用户需求的天气层绑定：
+ *  - 天气变了（condition 翻转）→ changed=true → 壳层才让猫吐槽；
+ *  - 头顶挂件跟随**实时**天气：雨（精力<8）= rain-drop 落小雨，晴+精力≥8 = sunbeam 出太阳；
+ *  - 例行刷新天气没变 → changed=false（不打扰）；精力变化不算天气变化。 */
+
+test('coordinator: refreshWeather 广播 changed 标志，头顶挂件随实时天气更新', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'energy-pet-coord-'));
+  let condition: WeatherCondition = 'rain';
+  const c = new Coordinator({
+    userDataPath: dir,
+    weatherFetcher: async () => ({ condition, tempC: 18 }),
+  });
+  try {
+    const seen: BusPayloads['weather:changed'][] = [];
+    c.bus.on('weather:changed', (p) => { seen.push(p); });
+    await c.start();
+    // start 的首刷是异步的（fetcher 立即解决）：等一拍让它落地
+    await new Promise((r) => setTimeout(r, 10));
+    c.cancelSlide();
+
+    // 首刷：无缓存 → 兜底「阴」，live 拉到「雨」= 语义翻转
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0], { source: 'live', changed: true, condition: 'rain', previous: 'cloudy' });
+    // 实时天气已绑定：sensor 拿到 live 雨
+    assert.equal(c.weather.current().condition, 'rain');
+    assert.equal(c.weather.current().source, 'live');
+    // 精力默认 7（<8）+ 雨 → 头顶落小雨
+    assert.equal(c.buildState().emotion.overlay, 'rain-drop');
+
+    // 天气转晴：changed=true；精力 7 + 晴 → 低精力区不挂太阳（R4 红线）
+    condition = 'sunny';
+    const w2 = await c.refreshWeather();
+    assert.equal(w2.condition, 'sunny');
+    assert.deepEqual(seen[1], { source: 'live', changed: true, condition: 'sunny', previous: 'rain' });
+    assert.equal(c.buildState().emotion.overlay, 'none');
+
+    // 例行刷新、天气没变 → changed=false（壳层静默同步，不让猫吐槽）
+    await c.refreshWeather();
+    assert.equal(seen[2]!.changed, false);
+    assert.equal(seen[2]!.condition, 'sunny');
+
+    // 精力拉到 9（≥8）+ 晴 = 状态好天也好 → 头顶出太阳
+    c.ledger.setEnergy(9);
+    await c.refreshWeather();
+    assert.equal(seen[3]!.changed, false); // 精力变化不算天气变化
+    assert.equal(c.buildState().emotion.overlay, 'sunbeam');
+
+    // 好状态下变天（雨）→ 挂件归 none（≥8 只显示好天气），但 changed=true 仍会广播
+    condition = 'rain';
+    await c.refreshWeather();
+    assert.equal(seen[4]!.changed, true);
+    assert.deepEqual(seen[4], { source: 'live', changed: true, condition: 'rain', previous: 'sunny' });
+    assert.equal(c.buildState().emotion.overlay, 'none');
+    // 精力掉回 <8 + 雨 → 小雨重新落下（归因外化）
+    c.ledger.setEnergy(5);
+    assert.equal(c.buildState().emotion.overlay, 'rain-drop');
+  } finally { c.stop(); rmSync(dir, { recursive: true, force: true }); }
 });

@@ -14,7 +14,7 @@
 import { describe as describeEmotion } from '../../emotion/engine.js';
 import { ENERGY_MAX } from '../../core/types.js';
 import type {
-  AppState, PendingSlide, InsightRecommendation, WeeklyReportPayload, WeeklyReport,
+  AppState, PendingSlide, InsightRecommendation, WeeklyReportPayload, WeeklyReport, DailyRecap,
   RecoveryItem, AdjustWindow, TaskDurationRequest, UiCmd,
 } from '../../core/types.js';
 import type { PetApi } from '../../preload/index.js';
@@ -68,6 +68,10 @@ const sMax = $('s-max');
 const sNote = $<HTMLTextAreaElement>('s-note');
 const sConfirm = $<HTMLButtonElement>('s-confirm');
 const sCancel = $<HTMLButtonElement>('s-cancel');
+// 晨间单题三选（ADHD 降噪 · 2026-10-27 裁决）：仅 morning 模式显示
+const qLow = $<HTMLButtonElement>('s-q-low');
+const qSame = $<HTMLButtonElement>('s-q-same');
+const qHigh = $<HTMLButtonElement>('s-q-high');
 
 // 任务时长确认卡（流程第一步：先确认实际时长，再调精力）
 const durationCard = $('duration-card');
@@ -91,7 +95,7 @@ const aCancel = $<HTMLButtonElement>('a-cancel');
 
 const panel = $('panel');
 const panelSub = $('panel-sub');
-// 精力恢复扇形菜单（onUiCmd openRecovery 唤起；径向 chips 围绕窗口底部中心）
+// 精力恢复清单（入口 = 猫 HUD 的 ⚡ → onUiCmd openRecovery，开关切换；本窗口无常驻按钮）
 const recoveryPop = $('recovery-pop');
 const rpRing = $('rp-ring');
 const rpClose = $('rp-close');
@@ -100,10 +104,13 @@ const taskList = $('task-list');
 const taskTitle = $<HTMLInputElement>('task-title');
 const taskCost = $<HTMLInputElement>('task-cost');
 const taskMinutes = $<HTMLInputElement>('task-minutes');
-// 周报弹窗（state.reportModal 驱动 / onUiCmd showWeekly 主动查看）
+// 复盘/周报弹窗（state.reportModal 驱动 / onUiCmd showWeekly 主动查看）
 const reportModal = $('report-modal');
+const rmTitle = $('rm-title');
 const rmRange = $('rm-range');
 const rmList = $('rm-list');
+const rmItemsSec = $('rm-items-sec');
+const rmItems = $('rm-items');
 const rmAiSec = $('rm-ai-sec');
 const rmAi = $('rm-ai');
 const rmDecSec = $('rm-dec-sec');
@@ -250,15 +257,14 @@ function collectHotRects(): HotRect[] {
     rects.push({ x, y, w, h });
   };
 
-  // 常驻交互容器（猫不在此窗口：无 pet-wrap / petBodyInWindow，也无 dock；
-  // HUD 精力条已迁移到 catWin，由猫窗口自行上报命中区）。
+  // 常驻交互容器（猫不在此窗口：无 pet-wrap / petBodyInWindow；本窗口无常驻按钮——
+  // ⚡ 入口在猫 HUD 胶囊里，空闲时这里返回空表 = 整窗穿透，属正常态）
   for (const sel of ['#panel', '#report-modal', '#slide-card', '#duration-card', '#adjust-card'] as const) push(document.querySelector(sel));
-  // 精力恢复扇形菜单：#recovery-pop 是 inset:0 全屏**穿透容器**，绝不能整块上报
-  // （否则整窗永久不可穿透）。只上报实际可见的 chip（含中央收起钮；弹出动画期间
-  // opacity<0.05 会被 hittable 过滤；显隐由 recoveryPop.show 类控制，见 explicitHidden）。
-  // 版本历史浮层同理，仅在存在时上报。
+  // 精力恢复清单：#recovery-pop 是 inset:0 全屏**穿透容器**，绝不能整块上报
+  // （否则整窗永久不可穿透）。只上报实际可见的羊皮纸面板（覆盖 chips 与收起钮；
+  // 显隐由 recoveryPop.show 类控制，见 explicitHidden）。版本历史浮层同理。
   if (recoveryPop.classList.contains('show')) {
-    document.querySelectorAll('#recovery-pop .rp-chip').forEach(push);
+    push(document.querySelector('#recovery-pop .rp-panel'));
     push(versionSlot.querySelector('.version-pop'));
   }
   // 推荐卡：只取实际卡片，避免空容器占位导致整块区域不可穿透
@@ -303,7 +309,7 @@ function setupHitTest(): void {
   // 兜底：低开销周期校对（CSS 过渡完成后尺寸可能与上报时有偏差）
   setInterval(reportHotRects, 1500);
   // 窗口尺寸变化：扇形菜单圆心跟随窗口底部中心
-  window.addEventListener('resize', () => { syncRingCenter(); reportHotRects(); });
+  window.addEventListener('resize', () => { reportHotRects(); });
 
   // 指针移动也会改变布局可见性（hover 位移 / 悬停显隐）。mousemove 不节流会 IPC 风暴，
   // 这里只做「变化检测」：光标与交互区的归属翻转时排两次上报（进入立即 + 过渡结束后），
@@ -434,6 +440,21 @@ function setupSlide(): void {
     void window.pet.slideCancel();
     hideSlide();
   });
+  // 晨间单题三选（ADHD 降噪）：点一下 = 确认 = 关闭。
+  // 三档映射「昨日收尾 ±1.5 / 0」（clampSlider 钳到 min–max 并取 0.5 档），
+  // 走既有 confirmSlide 写入链路（晨间基线唯一写入点红线不变），无第二步确认。
+  const quickMorning = (btn: HTMLButtonElement, delta: number): void => {
+    btn.addEventListener('click', async () => {
+      if (!slide || slide.kind !== 'morning-baseline') return;
+      const target = clampSlider(slide.baseEnergy + delta);
+      const ev = await window.pet.slideConfirm(target);
+      if (ev) toast(`今日电量 ${target.toFixed(1)} 分`);
+      hideSlide();
+    });
+  };
+  quickMorning(qLow, -1.5);
+  quickMorning(qSame, 0);
+  quickMorning(qHigh, +1.5);
   // Enter 确认（备注框内）
   sNote.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sConfirm.click(); }
@@ -526,8 +547,13 @@ function setupKeys(): void {
   window.addEventListener('keydown', (e) => {
     // Esc 收起恢复扇形（炉石式菜单的标配退出键）
     if (e.key === 'Escape' && recoveryPop.classList.contains('show')) { closeRecoveryPop(); return; }
+    if (!adjustCard.classList.contains('show')) {
+      // 调节弹窗不在时，Esc 兜底给滑动卡：晨间三选卡没有可见的「先不了」按钮
+      // （ADHD 降噪裁决），走 sCancel 同语义关闭（cancelSlide：晨间取消即完成，不追打扰）
+      if (e.key === 'Escape' && slideCard.classList.contains('show')) sCancel.click();
+      return;
+    }
     // 调节确认弹窗：Enter 提交 / Esc 放弃（焦点在按钮上时不抢原生激活，避免双触发）
-    if (!adjustCard.classList.contains('show')) return;
     const onButton = !!(e.target as HTMLElement | null)?.closest('button');
     if (e.key === 'Enter' && !e.shiftKey && !onButton) {
       if (e.target !== aNote) { e.preventDefault(); aConfirm.click(); } // 备注框内由 aNote 自己的处理器提交
@@ -580,23 +606,15 @@ function setupDurationCard(): void {
 
 /* ─────────────────────────── 精力恢复扇形菜单（径向 chips） ─────────────────────────── */
 
-/** 环圆心 = 窗口底部中心（猫不在本窗口，chips 围绕 HUD 上方展开） */
-function syncRingCenter(): void {
-  const cx = window.innerWidth / 2;
-  const cy = window.innerHeight - 120;
-  recoveryPop.style.setProperty('--cx', `${Math.round(cx)}px`);
-  recoveryPop.style.setProperty('--cy', `${Math.round(cy)}px`);
-}
-
+/** 展开恢复清单（入口：猫 HUD ⚡ / 右键菜单 / 托盘 → ui:cmd openRecovery 切换） */
 function openRecoveryPop(): void {
-  syncRingCenter();
   recoveryPop.classList.add('show');
-  // 与面板互斥：扇形菜单打开时收起面板，窗口模式回 pet（chip 自身在热区里）
+  // 与面板互斥：清单打开时收起面板，窗口模式回 pet（面板自身在热区里）
   panel.classList.remove('open');
   void window.pet.setMode('pet');
   // 主进程看不见这个本地 UI → uiHint(true) 保持窗口可见
   syncUiHint();
-  // 同步上报：chip 弹出动画 .3s，动画结束后复核一次最终位置的热区
+  // 同步上报：面板弹出动画 .3s，动画结束后复核一次最终位置的热区
   reportHotRects();
   window.setTimeout(reportHotRects, 340);
 }
@@ -606,7 +624,7 @@ function closeRecoveryPop(): void {
   versionSlot.innerHTML = '';
   // 本地活动 UI 关闭 → uiHint(false) 交还窗口显隐决定权
   syncUiHint();
-  // 同步回收命中区（收起动画期间 chip opacity 仍 >0，必须按 class 立即剔除）
+  // 同步回收命中区（收起动画期间面板 opacity 仍 >0，必须按 class 立即剔除）
   reportHotRects();
 }
 
@@ -614,30 +632,23 @@ function setupRecovery(): void {
   rpClose.addEventListener('click', closeRecoveryPop);
 }
 
-/* ─────────────────────────── 恢复项渲染（径向扇形菜单） ───────────────────────────
- * chips 沿**上半环扇形**均匀分布（扇区 150°，围绕窗口底部中心）。
- * 角度约定：0° = 正上方（CSS translateY(-R) 方向），向两侧展开。
- * --i 为弹出顺序：从中间向两侧（0,1,1,2,2,3…），像扑克牌甩出。
+/* ─────────────────────────── 恢复项渲染（侧旁手账清单） ───────────────────────────
+ * 用户裁定 2026-10-27：6 项按「2 个一排」成 3 行，排在 ⚡ 按钮旁边的羊皮纸面板里
+ * （替代旧径向扇形）。--i 为逐格展开顺序（0..5），CSS 按行错峰弹出。
  */
 
 function renderRecoveries(items: RecoveryItem[]): void {
   // 内容签名守卫：恢复项未变则不重建 chip —— 否则每次 applyState（精力/天气/任务
-  // 任意变动都会推送）都重放径向弹出动画，表现为「菜单一直闪」。
+  // 任意变动都会推送）都重放弹出动画，表现为「菜单一直闪」。
   const sig = items.map(i => `${i.id}:${i.icon}:${i.name}:${i.currentDelta}:${i.minutes}`).join('|');
   if (sig === lastRecoverySig && rpRing.childElementCount === items.length) return;
   lastRecoverySig = sig;
   rpRing.innerHTML = '';
-  const n = Math.max(1, items.length);
-  const SPAN = 150; // 扇区总张角（度）；±75° 保证相邻 chip 间距 > 直径，互不重叠
   for (let idx = 0; idx < items.length; idx++) {
     const item = items[idx]!;
-    const ang = n === 1 ? 0 : -SPAN / 2 + (SPAN / (n - 1)) * idx;
-    // 弹出顺序：中间先出，向两侧扩散（idx 距中心的位次）
-    const order = Math.abs(idx - (n - 1) / 2);
     const chip = document.createElement('div');
     chip.className = 'rp-chip';
-    chip.style.setProperty('--ang', `${ang.toFixed(2)}deg`);
-    chip.style.setProperty('--i', String(Math.round(order * 2)));
+    chip.style.setProperty('--i', String(idx));
     chip.title = `${item.name} · 约 ${item.minutes} 分钟`;
     // 精力清单只要文字：不带图标、不带默认值徽标（用户裁决 2026-10-26）
     chip.innerHTML = `<span class="nm">${escapeHtml(item.name)}</span>`;
@@ -725,7 +736,7 @@ function renderTasks(): void {
   const tasks = state.tasks;
   taskList.innerHTML = '';
   if (!tasks.length) {
-    taskList.innerHTML = '<div class="empty">还没有任务。添加一个，完成时我会问你感受如何。</div>';
+    taskList.innerHTML = '<div class="empty">暂无任务</div>';
     return;
   }
   const now = Date.now();
@@ -735,19 +746,21 @@ function renderTasks(): void {
     const row = document.createElement('div');
     const overdue = t.status === 'open' && t.dueAt !== null && t.dueAt < now;
     row.className = 'task-item' + (t.status !== 'open' ? ' done' : '') + (overdue ? ' overdue' : '');
-    // 面板展示「任务名称 + 预估/实际时长」（流程联动的信息基础）
+    // 极简文字（用户裁定 2026-10-27，参考晨间卡）：时长只留纯数字，超时改红点，按钮用 ✓/✕
     const dur = t.status === 'open'
-      ? (t.estMinutes > 0 ? `预估 ${t.estMinutes}′` : '未设时长')
-      : (t.actualMinutes !== null ? `实际 ${t.actualMinutes}′` : '已完成');
+      ? (t.estMinutes > 0 ? `${t.estMinutes}′` : '')
+      : (t.actualMinutes !== null ? `${t.actualMinutes}′` : '');
     row.innerHTML = `
-      <div class="t-title">${escapeHtml(t.title)}<span class="t-dur">${dur}</span></div>
-      ${overdue ? '<span class="overdue-tag">超时</span>' : ''}
+      <div class="t-title">${escapeHtml(t.title)}${dur ? `<span class="t-dur">${dur}</span>` : ''}</div>
+      ${overdue ? '<span class="overdue-dot" aria-label="超时"></span>' : ''}
       <span class="t-cost">-${t.estCost}</span>
     `;
     if (t.status === 'open') {
       const doneBtn = document.createElement('button');
       doneBtn.className = 'btn sm';
-      doneBtn.textContent = '完成';
+      doneBtn.textContent = '✓';
+      doneBtn.title = '完成';
+      doneBtn.setAttribute('aria-label', '完成');
       // 流程第一步：先弹时长确认卡（展示名称与预估时长），确认后才调精力
       doneBtn.addEventListener('click', () => {
         void window.pet.taskDurationRequest(t.id).then(req => {
@@ -757,7 +770,9 @@ function renderTasks(): void {
       });
       const dropBtn = document.createElement('button');
       dropBtn.className = 'btn ghost sm';
-      dropBtn.textContent = '放弃';
+      dropBtn.textContent = '✕';
+      dropBtn.title = '放弃';
+      dropBtn.setAttribute('aria-label', '放弃');
       dropBtn.addEventListener('click', () => { void window.pet.taskDrop(t.id); toast('已放弃'); });
       row.appendChild(doneBtn);
       row.appendChild(dropBtn);
@@ -787,14 +802,16 @@ interface ReportView {
 function renderReport(p: ReportView): void {
   const r = p.report;
 
+  rmTitle.textContent = '本周精力手账';
+  rmItemsSec.hidden = true; // 「今日明细」区仅每日复盘清单使用
   rmRange.textContent = `${fmtDate(r.weekStart)} – ${fmtDate(r.weekEnd - 1)} · 共 ${r.totalEvents} 条留痕`;
 
   // 主清单：墨线勾选条目（数据全部来自事件流 fold，非拍脑袋）
   const rows: { label: string; val: string }[] = [
     { label: '平均精力', val: `${r.avgEnergy} 分` },
     { label: '精力区间', val: `${r.minEnergy} ~ ${r.maxEnergy}` },
-    { label: '完成任务', val: `${r.tasksCompleted} 件` },
-    { label: '恢复次数', val: `${r.recoveriesTaken} 次` },
+    { label: '本周完成', val: `${r.tasksCompleted} 件` },
+    { label: '本周恢复', val: `${r.recoveriesTaken} 次` },
     { label: '最耗时段', val: r.peakDrainHour !== null ? `${r.peakDrainHour}:00 前后` : '—' },
     { label: '最有效恢复', val: r.bestRecovery ? `${r.bestRecovery.name} +${r.bestRecovery.avgDelta}` : '—' },
   ];
@@ -838,6 +855,51 @@ function renderReport(p: ReportView): void {
   rmNote.innerHTML = r.narrative.map(n => escapeHtml(n)).join('<br>');
 }
 
+/**
+ * 每日复盘清单（17:30 弹窗的日常内容；用户裁定 2026-10-27：每日弹的应是当日复盘，
+ * 而非「本周精力手账」——周手账保留给周五 requireAck 确认弹窗与右键「本周报告」查看态）。
+ * 数据来自当日事件流 fold；任务完成 = 成就感回血（正值语义，见 TASK_COMPLETE_PREDICTED）。
+ */
+function renderRecap(r: DailyRecap): void {
+  rmTitle.textContent = '每日复盘清单';
+  const [, mm, dd] = r.date.split('-');
+  rmRange.textContent = `${Number(mm)}月${Number(dd)}日 · 今天记下 ${r.items.length} 笔`;
+
+  // 汇总清单（勾选条目：与周手账共用信纸版式，文字各自专属）
+  const rows: { label: string; val: string }[] = [
+    { label: '今日完成', val: `${r.tasksCompleted} 件` },
+    { label: '任务回血', val: fmtDelta(r.taskGain) },
+    { label: '主动恢复', val: `${r.recoveriesTaken} 次` },
+    { label: '恢复回血', val: fmtDelta(r.recoverGain) },
+    { label: '精力走向', val: `${r.openEnergy} → ${r.closeEnergy}（净 ${fmtDelta(r.netChange)}）` },
+  ];
+  rmList.innerHTML = rows.map(x =>
+    `<li><span class="tick" aria-hidden="true"></span><span>${escapeHtml(x.label)}</span><b class="val">${escapeHtml(x.val)}</b></li>`,
+  ).join('');
+
+  // 今日明细：时间正序，勾选 + 名称 + Δ + 时刻
+  if (r.items.length) {
+    rmItemsSec.hidden = false;
+    rmItems.innerHTML = r.items.map(it => {
+      const d = new Date(it.at);
+      const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      return `<li><span class="tick" aria-hidden="true"></span><span>${escapeHtml(it.name)}</span>`
+        + `<b class="val">${fmtDelta(it.delta)}</b><span class="at">${hhmm}</span></li>`;
+    }).join('');
+  } else {
+    rmItemsSec.hidden = true;
+    rmItems.innerHTML = '';
+  }
+
+  // 每日复盘不带 AI 建议/决策留痕（那是周五周手账的确认内容）
+  rmAiSec.style.display = 'none';
+  rmDecSec.style.display = 'none';
+
+  rmNote.textContent = r.items.length
+    ? `今天完成 ${r.tasksCompleted} 个任务（${fmtDelta(r.taskGain)}），主动恢复 ${r.recoveriesTaken} 次（${fmtDelta(r.recoverGain)}）。猫都替你记下了。`
+    : '今天没有任务和恢复记录——安静的一天，也算数。';
+}
+
 /** 收起弹窗（两种态通吃）：查看态还要交还 uiHint */
 function hideReportModal(): void {
   shownReportDate = null;
@@ -847,7 +909,8 @@ function hideReportModal(): void {
   reportHotRects();
 }
 
-/** state.reportModal 驱动的显隐（payload 为 null 时收起；主动查看态不被误收） */
+/** state.reportModal 驱动的显隐（payload 为 null 时收起；主动查看态不被误收）。
+ *  用户裁定 2026-10-27：每日 17:30 弹「每日复盘清单」；周五 requireAck 确认弹「本周精力手账」。 */
 function applyReportModal(p: WeeklyReportPayload | null): void {
   if (!p) {
     if (shownReportDate !== null) {
@@ -863,13 +926,41 @@ function applyReportModal(p: WeeklyReportPayload | null): void {
   // 状态弹窗接管「主动查看态」：关闭从此走 reportConfirm
   weeklyViewOpen = false;
   shownReportDate = p.dateStr;
-  renderReport(p);
-  // 周五 requireAck：隐藏随手关闭按钮，必须点「已确认」
-  rmAck.style.display = '';
-  rmClose.style.display = p.requireAck ? 'none' : '';
-  reportModal.classList.add('show');
-  syncUiHint();
-  reportHotRects();
+
+  const showIt = (): void => {
+    // 周五 requireAck：隐藏随手关闭按钮，必须点「已确认」
+    rmAck.style.display = '';
+    rmClose.style.display = p.requireAck ? 'none' : '';
+    reportModal.classList.add('show');
+    syncUiHint();
+    reportHotRects();
+  };
+
+  if (p.requireAck) {
+    renderReport(p); // 周五：本周精力手账（AI 建议 + 决策留痕逐项过目）
+    showIt();
+    return;
+  }
+  // 日常：拉今日复盘清单渲染；无数据/接口异常 → 合成空白每日页（零记录 + 安静的一天叙述）。
+  // **绝不回退周手账**——每日弹窗必须说每日的语言（用户裁定 2026-10-27：每日/每周文字不得混同）
+  const blankRecap = (): DailyRecap => {
+    const e = state ? Math.round(state.energy * 10) / 10 : 5;
+    return {
+      date: p.dateStr,
+      items: [],
+      tasksCompleted: 0, taskGain: 0, recoveriesTaken: 0, recoverGain: 0,
+      openEnergy: e, closeEnergy: e, netChange: 0,
+    };
+  };
+  window.pet.dailyRecap().then(r => {
+    if (shownReportDate !== p.dateStr) return; // 等待期间已被关闭或新弹窗接管
+    renderRecap(r || blankRecap());
+    showIt();
+  }).catch(() => {
+    if (shownReportDate !== p.dateStr) return;
+    renderRecap(blankRecap());
+    showIt();
+  });
 }
 
 /** onUiCmd showWeekly：主动拉取周报，以查看态展示（无 ack；关闭不 reportConfirm） */
@@ -1035,7 +1126,6 @@ function applyState(s: AppState): void {
 
 function boot(): void {
   // HUD 已整体迁移到 catWin（桌宠下方，悬浮显示）——本窗口不再有 HUD 初始化
-  syncRingCenter();
   paintRange(sSlider);
   paintRange(aSlider);
 
@@ -1052,7 +1142,12 @@ function boot(): void {
   window.pet.onUiCmd((cmd: UiCmd) => {
     switch (cmd.type) {
       case 'openPanel': openPanel(); break;
-      case 'openRecovery': openRecoveryPop(); break;
+      // 猫 HUD 的 ⚡ 是开关钮（用户裁定 2026-10-27：替代原 uiWin 左侧常驻圆钮）：
+      // 清单已展开时再按一次 = 收起
+      case 'openRecovery':
+        if (recoveryPop.classList.contains('show')) closeRecoveryPop();
+        else openRecoveryPop();
+        break;
       case 'showWeekly': void showWeekly(); break;
     }
   });

@@ -51,12 +51,19 @@ export class Coordinator {
     //   （三者任一被显式注入就关掉 IP 定位——测试注入 fetcher 时不应真去联网定位）⟩
 
   /* ── 生命周期 ── */
+  refreshWeather(): Promise<WeatherState>;
+    // 🆕 ⟨**天气刷新+广播唯一入口**（启动首刷 / 30min 定时 / IP 定位后 / 手动刷新都走这里）：
+    //   previous=weather.current().condition → await weather.refresh()（永不 reject）
+    //   → emit('weather:changed', {source, changed: condition!==previous, condition, previous})。
+    //   壳层（main/index.ts）据此 flushState + pushMood（头顶挂件随实时天气更新），
+    //   仅 changed=true 时 react('weather') 让猫吐槽⟩
   start(): Promise<void>;
-    // ⟨seedIfEmpty → append(sessionStarted) → weather.refresh()(不阻塞)
-    //   → **3 个 setInterval 全部 push 进 `timers`**（天气 WEATHER_REFRESH_MS /
+    // ⟨seedIfEmpty → append(sessionStarted) → refreshWeather()(不阻塞)
+    //   → **3 个 setInterval 全部 push 进 `timers`**（天气 WEATHER_REFRESH_MS 走 refreshWeather /
     //     洞察 INSIGHT_BATCH_MS / 周报 REPORT_CHECK_MS）
     //   → maybeMorningBaseline() → insightStartupTimer = setTimeout(3000)
-    //   → geoEnabled 时 geoTimer = setTimeout(IP 定位 → weather.setLocation + emit geo:changed)⟩
+    //   → geoEnabled 时 geoTimer = setTimeout(IP 定位 → weather.setLocation + emit geo:changed
+    //     → refreshWeather())⟩
   stop(): void;
     // ⟨for (timers) clearInterval → append(sessionEnded) + upsertDailySnapshot
     //   → **单独 clearTimeout(insightStartupTimer / geoTimer)** → bus.clear() → log.close()⟩

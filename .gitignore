@@ -25,3 +25,12 @@ Thumbs.db
 # 皮肤管线缓存（可再生，运行时生成）
 skins/**/.cache/
 release/
+
+# 视频抽帧管线中间产物（walk-video/README.md）
+walk-video/*.mp4
+walk-video/*.mov
+walk-video/*.webm
+walk-video/frames-*/
+
+# 微信会话临时数据（probe/profileW 含登录态与运行中 pid，严禁入库）
+.tmp-wx/

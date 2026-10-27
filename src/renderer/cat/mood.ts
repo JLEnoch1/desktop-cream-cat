@@ -8,25 +8,59 @@
  *
  * 红线继承（DESIGN.md）：低精力表达疲惫靠「少动、快睡、慢走」与文案的温柔，
  * **绝不贬损用户**；精力再低猫也陪着你，只是先躺下了。
+ *
+ * 调节预览：withPreviewEnergy() 把「草稿精力」叠加成有效心情输入——
+ * 宠物情绪随精力值调节实时变化，调节结束（回弹/取消/落库）即恢复真值。
  */
 
-import { tierFor } from '../../emotion/engine.js';
+import { tierFor, resolveWeatherOverlay } from '../../emotion/engine.js';
 import type { BaseEmotion, WeatherCondition } from '../../core/types.js';
 import type { CatMoodPayload } from '../../core/types.js';
 
 export type MoodInput = CatMoodPayload;
 
+/**
+ * 精力调节预览 → 有效心情输入（纯函数，可单测）。
+ *
+ * previewEnergy 为 null 时**原样返回**（= 已落库心情，引用不变）；
+ * 非 null 时只重算「能量派生字段」：
+ *   energy / emotion.energy / emotion.base（查 tier 表）/
+ *   emotion.overlay（门槛仍走 resolveWeatherOverlay 唯一入口，R6 合规）。
+ *
+ * 刻意**不动** pulse / composite / headline / pulseActive——草稿还没进事件流，
+ * 瞬时反应与叙事摘要必须保持真值，否则预览一旦回弹就出现「图文互相打脸」
+ * 的残影（composite 本就禁止驱动表情，见 DESIGN.md §4.4）。
+ */
+export function withPreviewEnergy(m: MoodInput, previewEnergy: number | null): MoodInput {
+  if (previewEnergy == null) return m;
+  const e = clamp(previewEnergy, 0, 10);
+  return {
+    ...m,
+    energy: e,
+    emotion: {
+      ...m.emotion,
+      energy: e,
+      base: tierFor(e).emotion,
+      overlay: resolveWeatherOverlay(e, m.weather.condition),
+    },
+  };
+}
+
 export interface MoodParams {
-  /** 行为活力乘数（0.3–1.2）：散步/舔毛/攀爬概率与节奏 */
+  /** 行为活力乘数（0.12–1.30）：散步/舔毛/攀爬概率与节奏——低精力基本不动，高精力坐不住 */
   activity: number;
-  /** 无互动多久入睡（ms）：精力高 45s → 精力低 12s */
+  /** 无互动多久入睡（ms）：精力低 9s（没精力，很快睡过去）→ 精力高 45s */
   sleepIdleMs: number;
-  /** 地面步速（px/s）：28–46 */
+  /** 地面步速（px/s）：16–48——低精力拖步「走不动」，高精力轻快 */
   walkSpeed: number;
   /** 眨眼间隔乘数（tier.blink / 4.0） */
   blinkScale: number;
   /** 呼吸周期（s，tier.breath） */
   breathPeriod: number;
+  /** 归一化活力（0–1 = energy/10）：姿态外化的单一输入——
+   *  低=瘫软下沉/垂头丧气/步态无弹跳/耳尾耷拉，高=挺拔/弹跳步/耳尾有神。
+   *  由 FSM 做 ~0.55s 指数平滑 → 每次消耗/恢复都肉眼可见地「记在身上」（低落下去/高涨起来） */
+  vitality: number;
 }
 
 const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v));
@@ -35,18 +69,19 @@ const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(
 export function computeMoodParams(m: MoodInput): MoodParams {
   const e = clamp(m.energy, 0, 10);
   const tier = tierFor(e);
-  // 活力：0 分 0.30 → 10 分 1.20（线性）
-  const activity = 0.3 + (e / 10) * 0.9;
-  // 入睡阈值：e<=2 → 12s；e>=8 → 45s；中间线性
-  const sleepIdleMs = e <= 2 ? 12_000 : e >= 8 ? 45_000 : 12_000 + ((e - 2) / 6) * 33_000;
-  // 步速：e<=1 → 28；e>=8 → 46；中间线性
-  const walkSpeed = e <= 1 ? 28 : e >= 8 ? 46 : 28 + ((e - 1) / 7) * 18;
+  // 活力：0 分 0.12 → 10 分 1.30（线性）
+  const activity = 0.12 + (e / 10) * 1.18;
+  // 入睡阈值：e<=2 → 9s（累到站着就能睡着）；e>=8 → 45s；中间线性
+  const sleepIdleMs = e <= 2 ? 9_000 : e >= 8 ? 45_000 : 9_000 + ((e - 2) / 6) * 36_000;
+  // 步速：e<=1 → 16（走不动，挪步）；e>=8 → 48（轻快）；中间线性
+  const walkSpeed = e <= 1 ? 16 : e >= 8 ? 48 : 16 + ((e - 1) / 7) * 32;
   return {
     activity,
     sleepIdleMs,
     walkSpeed,
     blinkScale: tier.blink / 4.0,
     breathPeriod: tier.breath,
+    vitality: e / 10,
   };
 }
 
@@ -57,6 +92,7 @@ export const NEUTRAL_MOOD: MoodParams = {
   walkSpeed: 46,
   blinkScale: 1,
   breathPeriod: 2.8,
+  vitality: 1,
 };
 
 /* ─────────────────────────── 气泡文案库 ─────────────────────────── */

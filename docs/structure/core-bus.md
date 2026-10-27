@@ -18,7 +18,10 @@ export type BusEventName =
 export interface BusPayloads {
   'event:appended': { id: number; type: string };
   'energy:changed': { energy: number; previous: number };
-  'weather:changed': { source: string };
+  // ⟨changed=天气语义（condition）是否真的翻转：壳层仅在 true 时让猫吐槽天气；
+  //   无论变没变都 emit → 壳层重推 state + cat:mood（头顶天气挂件随实时天气更新）。
+  //   condition/previous 供诊断；渲染层一律以 cat:mood 推送为准⟩
+  'weather:changed': { source: string; changed: boolean; condition: WeatherCondition; previous: WeatherCondition };
   'task:changed': undefined;
   'recovery:changed': undefined;
   'slide:requested': { kind: string; refId: string };

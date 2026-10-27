@@ -81,7 +81,8 @@ main 订阅 bus 的领域事件 → cat:react 轻量通知（reaction 名 + 可�
   adjust:opened           → 「做完啦？7 秒内可以微调～」
   adjust:committed(Δ>0)   → happy 表情 + 爱心
   recovery 确认            → happy + 「呼噜呼噜~ 舒服多了」
-  weather:changed         → 按新天气吐槽（雨：「下雨了,记得带伞喵」…）
+  weather:changed(changed) → 重推 cat:mood（头顶挂件随实时天气更新：雨=落小雨，精力≥8+晴=出太阳）；
+                             仅天气语义真变（changed=true）才按新天气吐槽（雨：「下雨了,记得带伞喵」…）
   recommendation:new      → 「我发现了一个小规律,想不想看看?」
   report(17:30)           → 「周报出炉~ 瞄一眼?」
   energy 跨过 3 分下行     → 「电量低了,要不要一起休息一下?」

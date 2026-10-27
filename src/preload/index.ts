@@ -10,7 +10,7 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
-  AppState, PendingSlide, WindowMode, RecoveryItem, RecoveryVersion, WeeklyReport,
+  AppState, PendingSlide, WindowMode, RecoveryItem, RecoveryVersion, WeeklyReport, DailyRecap,
   WeatherState, AdjustWindow, TaskDurationRequest, CatLayout, CatCmd, CatMoodPayload,
   CatReactPayload, UiCmd,
 } from '../core/types.js';
@@ -111,6 +111,7 @@ const petApi = {
 
   /* ─────────── 洞察 ─────────── */
   weeklyReport: (): Promise<WeeklyReport | null> => ipcRenderer.invoke('insight:weeklyReport'),
+  dailyRecap: (): Promise<DailyRecap | null> => ipcRenderer.invoke('insight:dailyRecap'),
   reportConfirm: (): Promise<boolean> => ipcRenderer.invoke('report:confirm'),
   emotionSummary: (): Promise<string> => ipcRenderer.invoke('emotion:summary'),
 
@@ -135,6 +136,10 @@ const catApi = {
   /** 右键弹菜单（菜单内容由主进程动态构建） */
   showMenu: (): void => {
     ipcRenderer.send('cat:showMenu');
+  },
+  /** HUD 快捷按钮 → 任务面板 / 精力恢复扇形（与右键菜单同一主进程入口） */
+  openEntry: (entry: 'tasks' | 'recovery'): void => {
+    ipcRenderer.send('cat:openEntry', entry);
   },
   openAccessibility: (): void => {
     ipcRenderer.send('cat:openAccessibility');

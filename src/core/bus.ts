@@ -7,10 +7,12 @@
  * 不做持久化、不做重放 —— 那是 DecisionLog 的事。
  */
 
+import type { WeatherCondition } from './types.js';
+
 export type BusEventName =
   | 'event:appended'      // 新事件已落库
   | 'energy:changed'      // 精力值变化
-  | 'weather:changed'     // 天气刷新
+  | 'weather:changed'     // 天气已刷新（changed 标记语义是否真的变了）
   | 'geo:changed'         // IP 定位完成，坐标已热更新
   | 'task:changed'        // 任务列表变化
   | 'recovery:changed'    // 恢复项变化
@@ -29,7 +31,9 @@ export type BusEventName =
 export interface BusPayloads {
   'event:appended': { id: number; type: string };
   'energy:changed': { energy: number; previous: number };
-  'weather:changed': { source: string };
+  /** 天气已刷新。changed=语义是否真的翻转（壳层据此决定猫要不要吐槽）；
+   *  condition/previous=新旧天气语义（诊断/日志用，渲染层一律以 cat:mood 推送为准） */
+  'weather:changed': { source: string; changed: boolean; condition: WeatherCondition; previous: WeatherCondition };
   'geo:changed': { lat: number; lon: number; city: string };
   'task:changed': undefined;
   'recovery:changed': undefined;

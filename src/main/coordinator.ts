@@ -28,7 +28,7 @@ import {
   sessionEndedDraft, sessionStartedDraft, round2,
 } from '../core/events.js';
 import type { DomainEvent } from '../core/events.js';
-import type { AppState, PendingSlide, WindowMode, WeeklyReport, WeeklyReportPayload, AdjustWindow, TaskDurationRequest } from '../core/types.js';
+import type { AppState, PendingSlide, WindowMode, WeeklyReport, WeeklyReportPayload, DailyRecap, AdjustWindow, TaskDurationRequest, WeatherState } from '../core/types.js';
 
 /** 天气刷新间隔（30 分钟） */
 const WEATHER_REFRESH_MS = 30 * 60 * 1000;
@@ -107,17 +107,42 @@ export class Coordinator {
 
   /* ─────────────────────────── 生命周期 ─────────────────────────── */
 
+  /**
+   * 刷新天气并广播 —— 全项目唯一入口（启动首刷 / 30min 定时 / IP 定位后 / 手动刷新都走这里）。
+   *
+   * changed = 天气语义（condition）是否真的翻转：
+   *   - 无论变没变都 emit `weather:changed` → 壳层重推 state + 猫心情（cat:mood），
+   *     头顶天气挂件（太阳/小雨/闪电）随实时天气即时更新（门槛仍走 resolveWeatherOverlay 唯一入口）；
+   *   - 壳层仅在 changed=true 时让猫「吐槽天气」——30min 例行刷新天气没变就不打扰用户。
+   *
+   * refresh() 本身永不 reject（传感器内部三级降级）；此处 catch 只是防御 db 关闭等极端场景。
+   */
+  async refreshWeather(): Promise<WeatherState> {
+    const previous = this.weather.current().condition;
+    let st: WeatherState;
+    try {
+      st = await this.weather.refresh();
+    } catch {
+      st = this.weather.current();
+    }
+    this.bus.emit('weather:changed', {
+      source: st.source,
+      changed: st.condition !== previous,
+      condition: st.condition,
+      previous,
+    });
+    return st;
+  }
+
   async start(): Promise<void> {
     // 种子恢复项版本历史
     this.deck.seedIfEmpty();
     // 开机事件
     this.log.append(sessionStartedDraft());
     // 首次天气刷新（不阻塞启动）
-    this.weather.refresh().then(() => this.bus.emit('weather:changed', { source: this.weather.current().source })).catch(() => {});
+    void this.refreshWeather();
     // 定时任务
-    this.timers.push(setInterval(() => {
-      this.weather.refresh().then(() => this.bus.emit('weather:changed', { source: this.weather.current().source })).catch(() => {});
-    }, WEATHER_REFRESH_MS));
+    this.timers.push(setInterval(() => { void this.refreshWeather(); }, WEATHER_REFRESH_MS));
     this.timers.push(setInterval(() => this.runInsightBatch(), INSIGHT_BATCH_MS));
     // 周报调度（需求 5）：每 60s 检查是否到达 17:30；无随时查看入口，仅弹窗一条路
     this.timers.push(setInterval(() => this.checkReportDue(), REPORT_CHECK_MS));
@@ -137,8 +162,7 @@ export class Coordinator {
             // 省市一并传入：QQ 天气（默认主源）按省+市查询实时观测
             this.weather.setLocation(p.lat, p.lon, p.city, p.province);
             this.bus.emit('geo:changed', p);
-            await this.weather.refresh();
-            this.bus.emit('weather:changed', { source: this.weather.current().source });
+            await this.refreshWeather();
           })
           .catch(() => {});
       }, 1500);
@@ -577,6 +601,11 @@ export class Coordinator {
 
   weeklyReport(): WeeklyReport {
     return this.insight.weeklyReport();
+  }
+
+  /** 每日复盘清单（17:30 弹窗日常内容源；周五确认弹窗仍走周报手账） */
+  dailyRecap(): DailyRecap {
+    return this.insight.dailyRecap();
   }
 
   /**

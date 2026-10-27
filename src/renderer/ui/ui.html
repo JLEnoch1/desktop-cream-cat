@@ -21,10 +21,11 @@
     <!-- AI 推荐卡片堆栈 -->
     <div id="rec-stack" data-interactive></div>
 
-    <!-- 滑动确认卡片（晨间基线 / 临时调节预览）—— 皇室书信卡：
-         信头徽记 + 居中问候 + 双细线分隔（呼应周报手账 rm-head 的墨线排版），
-         精力大数字做成印章徽记，备注是附言横线，落款区左下猫爪火漆印 + 右下按钮。
-         配色仍是奶油纸感（token 不动），只换布局语言。 -->
+    <!-- 滑动确认卡片（晨间基线 / 临时调节预览）—— 双形态：
+         · 晨间基线 = 单题三选（ADHD 降噪 · 用户裁决 2026-10-27）：一行问题 + 三个大按钮，
+           点一下即确认即关闭；书信元素与滑轨系统全部隐藏（CSS 按 .morning 让位）。
+         · 临时调节 = 皇室书信卡（信头徽记/双细线/印章数字/附言横线/猫爪火漆印），滑轨预览。
+         配色仍是奶油纸感（token 不动）。两套形态共用本 DOM，隐藏节点保留以守 JS 写入契约。 -->
     <div id="slide-card" data-interactive>
       <div class="s-crest" aria-hidden="true">
         <!-- 信头徽记：奶油猫头（favicon.svg 同款内联，墨线着色） -->
@@ -47,6 +48,16 @@
         <span class="s-delta" id="s-delta">Δ 0</span>
       </div>
       <div class="s-predicted" id="s-predicted-row"><span class="lead">事件默认</span> <b id="s-predicted">0</b>（仅参考）· 滑动确认你当前的真实精力</div>
+      <!-- 晨间单题三选（ADHD 降噪）：仅 .morning 显示；点一下 = slideConfirm(昨日收尾 ±1.5/0) = 关卡。
+           无第二步确认、无附言；想反悔用 Esc（= 先不了语义，晨间取消即完成不追打扰）。 -->
+      <div class="s-quick">
+        <div class="s-q">比起昨天收尾 ——</div>
+        <div class="s-q-opts">
+          <button class="s-q-btn low" id="s-q-low">更累些</button>
+          <button class="s-q-btn same" id="s-q-same">差不多</button>
+          <button class="s-q-btn high" id="s-q-high">有电</button>
+        </div>
+      </div>
       <div class="s-sec-h" aria-hidden="true"></div>
       <div class="slider-track">
         <div class="zero-mark" id="s-base-mark"></div>
@@ -70,6 +81,7 @@
           <button class="btn" id="s-confirm">确认</button>
         </div>
       </div>
+      <!-- 金尖羽毛笔（统一手账样式 · 用户裁定 2026-10-27）：斜搁纸面，笔尖钉最后一行墨迹 -->
     </div>
 
     <!-- 任务时长确认卡（流程第一步：先确认实际时长，再调精力） -->
@@ -86,6 +98,7 @@
         <button class="btn ghost" id="d-cancel">先不了</button>
         <button class="btn" id="d-confirm">确认时长</button>
       </div>
+      <!-- 金尖羽毛笔（统一手账样式 · 用户裁定 2026-10-27） -->
     </div>
 
     <!-- 精力调节确认弹窗（7 秒窗口结束后弹出；Enter 提交 / Esc 放弃） -->
@@ -113,6 +126,7 @@
         <button class="btn ghost" id="a-cancel">放弃调节</button>
         <button class="btn" id="a-confirm">确认并记录</button>
       </div>
+      <!-- 金尖羽毛笔（统一手账样式 · 用户裁定 2026-10-27） -->
     </div>
 
     <!-- 任务面板（panel 模式） -->
@@ -129,7 +143,7 @@
           </svg>
         </span>
         <div class="head-txt">
-          <h1 id="panel-title">精力控制台</h1>
+          <h1 id="panel-title">任务清单</h1>
           <div class="sub" id="panel-sub">—</div>
         </div>
         <button class="icon-btn" id="panel-quit" title="退出应用">⏻</button>
@@ -141,46 +155,61 @@
             <input type="text" id="task-title" placeholder="新任务…" maxlength="60" />
             <input type="number" id="task-cost" class="cost" min="0" max="5" step="0.5" value="1" title="预估消耗（0–5）" />
             <input type="number" id="task-minutes" class="cost" min="0" max="1440" step="5" value="30" title="预估时长（分钟）" />
-            <button class="btn sm" id="task-add-btn">添加</button>
+            <button class="btn sm" id="task-add-btn" title="添加任务" aria-label="添加任务">+</button>
           </div>
           <div id="task-list"></div>
         </div>
       </div>
     </div>
 
-    <!-- 精力恢复扇形菜单（onUiCmd openRecovery 唤起；径向 chips 围绕窗口底部中心展开）
-         容器 inset:0 但永远 pointer-events:none，只有 chip 接管指针（click-through 红线） -->
+    <!-- 精力恢复清单（入口 = 猫 HUD 胶囊里的 ⚡ → cat:openEntry → onUiCmd openRecovery 开关切换；
+         用户裁定 2026-10-27 二次修订：本窗口**不要常驻圆钮**，面板贴左缘（紧邻猫一侧）展开。
+         容器 inset:0 但永远 pointer-events:none，只有面板接管指针（click-through 红线） -->
     <div id="recovery-pop" data-interactive>
-      <div class="rp-hint">休息一下下 · 点泡泡开始 · Esc 或 ✕ 收起</div>
-      <div class="rp-ring" id="rp-ring"></div>
-      <!-- 中央收起钮（静态，不随 renderRecoveries 重建） -->
-      <button class="rp-chip rp-close" id="rp-close" title="收起 (Esc)">✕</button>
-      <div id="version-slot"></div>
+      <div class="rp-panel">
+        <div class="rp-head">
+          <span class="rp-hint">休息一下下 · 点一下开始 · Esc 或 ✕ 收起</span>
+          <!-- 收起钮（静态，不随 renderRecoveries 重建） -->
+          <button class="rp-close" id="rp-close" title="收起 (Esc)">✕</button>
+        </div>
+        <div class="rp-grid" id="rp-ring"></div>
+        <div id="version-slot"></div>
+      </div>
     </div>
 
-    <!-- 周报弹窗（state.reportModal 驱动 / onUiCmd showWeekly 主动查看；奶油纸感手账） -->
+    <!-- 每日复盘清单 / 周报弹窗（state.reportModal 每天 17:30 驱动：日常弹「每日复盘清单」，
+         周五 requireAck 弹「本周精力手账」确认；onUiCmd showWeekly 主动查看周手账。
+         样式 = 原版魔法信件：羊皮纸 + 羊毛卷 + 火漆印 + 金尖羽毛笔（用户裁定 2026-10-27 恢复） -->
     <div id="report-modal" data-interactive>
-      <div class="rm-sheet">
-        <div class="rm-head">
-          <div class="rm-head-txt">
-            <h2>本周精力手账</h2>
+      <div class="rm-scroll">
+        <div class="rm-roll top" aria-hidden="true"></div>
+        <div class="rm-sheet">
+          <div class="rm-head">
+            <h2 id="rm-title">每日复盘清单</h2>
             <div class="rm-sub" id="rm-range">—</div>
+            <button class="icon-btn" id="rm-close" title="关闭">✕</button>
           </div>
-          <button class="icon-btn" id="rm-close" title="关闭">✕</button>
+          <ul class="rm-list" id="rm-list"></ul>
+          <div class="rm-sec" id="rm-items-sec" hidden>
+            <h3>今日明细</h3>
+            <ul class="rm-list rm-items" id="rm-items"></ul>
+          </div>
+          <div class="rm-sec" id="rm-ai-sec">
+            <h3>AI 推荐默认值</h3>
+            <ul class="rm-list rm-ai" id="rm-ai"></ul>
+          </div>
+          <div class="rm-sec" id="rm-dec-sec">
+            <h3>已确认的变更留痕</h3>
+            <ul class="rm-list rm-dec" id="rm-dec"></ul>
+          </div>
+          <div class="rm-note" id="rm-note"></div>
+          <div class="rm-actions">
+            <!-- 火漆印入流：钉在按钮行左侧空白区（信末），滚动跟随且永不压字 -->
+            <div class="rm-seal" aria-hidden="true">封</div>
+            <button class="btn amber" id="rm-ack">已确认</button>
+          </div>
         </div>
-        <ul class="rm-list" id="rm-list"></ul>
-        <div class="rm-sec" id="rm-ai-sec">
-          <h3>AI 推荐默认值</h3>
-          <ul class="rm-list rm-ai" id="rm-ai"></ul>
-        </div>
-        <div class="rm-sec" id="rm-dec-sec">
-          <h3>已确认的变更留痕</h3>
-          <ul class="rm-list rm-dec" id="rm-dec"></ul>
-        </div>
-        <div class="rm-note" id="rm-note"></div>
-        <div class="rm-actions">
-          <button class="btn" id="rm-ack">已确认</button>
-        </div>
+        <div class="rm-roll bottom" aria-hidden="true"></div>
       </div>
     </div>
 

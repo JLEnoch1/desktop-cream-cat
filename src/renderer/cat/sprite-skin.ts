@@ -34,8 +34,10 @@ export interface DrawInfo {
   squashT?: number;
   /** 离地高度归一化（0 地面 → 1 高空），驱动接地阴影 */
   air?: number;
-  /** 当前移速 px/s（步态引擎速度同步用） */
+  /** 当前移速 px/s（步态引擎速度同步用；应报速度包络后的真实步速 walkV） */
   speed?: number;
+  /** 窗口整数步进的亚像素余量（画布层补偿平移，消除 0/1px 交替微跳） */
+  subX?: number;
 }
 
 export interface GaitAnimConfig {
@@ -204,6 +206,7 @@ export async function createSpriteSkin(assets: SkinAssetsV2, opts: SpriteSkinOpt
   const stateClock: Record<string, number> = {}; // 每状态独立帧时钟：切状态清零，防相位跳变
   let expr: { name: string; def: ExprSeq; t: number } | null = null;
   let prevState = '';
+  let lastFace: number | null = null; // 上一帧朝向：转身瞬间触发交叉溶解，消除镜像 pop
   let t = 0;
   let overlay: WeatherOverlay = 'none';
   let pulse: PulseReaction = 'none';
@@ -472,6 +475,9 @@ export async function createSpriteSkin(assets: SkinAssetsV2, opts: SpriteSkinOpt
     draw(p: SkinPose, now: number, info: DrawInfo): void {
       const dt = info.dt || 0.016;
       t = now;
+      // 亚像素补偿：窗口只能整数步进，余量画进画布 → 移速轨迹真正连续（消除 0/1px 交替微跳）
+      ctx.save();
+      ctx.translate(info.subX ?? 0, 0);
       const state = info.state;
       const a = animOf(state);
       const walkDef = states['walk'];
@@ -481,20 +487,30 @@ export async function createSpriteSkin(assets: SkinAssetsV2, opts: SpriteSkinOpt
         stateClock[state] = 0;
         if (expr && !expr.def.once) expr = null; // 循环表情随状态切换结束
         // 状态边界：把上一状态的最后一帧做交叉溶解快照，消除姿态/位置突跳
+        // 离开带步态的状态（walk）用其 exitT：更长的渐出让停步更柔和
         if (lastBody && lastBody.length) {
-          const xf = (a ?? DEF_ANIM).stateXfade;
+          const prevA = animOf(prevState);
+          const xf = prevA ? (prevA.exitT ?? prevA.stateXfade) : (a ?? DEF_ANIM).stateXfade;
           if (xf > 0) snap = { bodies: lastBody, t: 0, dur: xf };
         }
         if (state === 'walk' && a) gaitReset(a, state); // 起步相位归零，步态从头开始
+      } else if (lastBody && lastBody.length && p.face !== lastFace) {
+        // 转身边界：旧朝向最后一帧做溶解，消除镜像瞬间 pop
+        //（FSM 已在转身前把速度刹到 ≈0，这里只过渡姿态；减速+溶解=自然转身）
+        const xf = (a ?? DEF_ANIM).stateXfade;
+        if (xf > 0) snap = { bodies: lastBody, t: 0, dur: xf };
       }
+      lastFace = p.face;
       prevState = state;
       stateClock[state] = (stateClock[state] ?? 0) + dt;
 
       let img: HTMLImageElement | null = null;
       let bob = 0;
       let rot = p.rot;
-      let sy = 1;
-      let sx = 1;
+      // pose 缩放单源：CatPose.sx/sy 已由 FSM computePose 统一合成呼吸（mood 驱动）、
+      // 落地压扁（squashT）与自定义姿势覆盖 —— 皮肤层忠实呈现，不再自行叠算这两通道
+      let sy = p.sy ?? 1;
+      let sx = p.sx ?? 1;
       if (expr) {
         expr.t += dt;
         const def = expr.def;
@@ -522,10 +538,8 @@ export async function createSpriteSkin(assets: SkinAssetsV2, opts: SpriteSkinOpt
         }
       }
 
-      const sq = Math.min(1, (info.squashT ?? 0) / 0.22);
-      sy *= 1 - 0.14 * sq;
-      sx *= 1 + 0.1 * sq;
-      sy *= 1 + Math.sin(t * 2.3) * 0.008; // 呼吸
+      // （原皮肤侧呼吸/落地压扁叠算已移除：两通道单一来源在 CatPose.sx/sy，
+      //   避免与 FSM 合成值双重叠加 —— 见上方「pose 缩放单源」注释）
 
       let bodies: Body[] | null = null; // 多层本体（交叉溶解时两层）
       if (walkActive && a && walkDef && gait) {
@@ -538,11 +552,11 @@ export async function createSpriteSkin(assets: SkinAssetsV2, opts: SpriteSkinOpt
         rot += g.sway;
         sy *= g.sy;
         sx *= g.sx;
-        // 步内交叉溶解：临近换帧点把下一帧淡入，消除两帧硬切
+        // 步内交叉溶解：混合窗=步尾 crossfade×0.5（0=硬切，1=后半步溶解，2=全程连续 morph）
         const n = walkDef.imgs.length;
         const i0 = gait.idx % n;
         const i1 = (gait.idx + 1) % n;
-        const m = Math.max(0, Math.min(0.5, a.crossfade * 0.5));
+        const m = Math.max(0, Math.min(1, a.crossfade * 0.5));
         const wgt = m > 0 && gait.phi > 1 - m ? (gait.phi - (1 - m)) / m : 0;
         bodies = [{ img: walkDef.imgs[i0]!, bob, rot, sx, sy, face: p.face, alpha: 1 }];
         if (wgt > 0 && i1 !== i0) {
@@ -586,7 +600,7 @@ export async function createSpriteSkin(assets: SkinAssetsV2, opts: SpriteSkinOpt
       for (const b of bodies) drawBody(b.img, b.bob, b.rot, b.sx, b.sy, b.face, b.alpha);
       lastBody = bodies;
 
-      // 睡觉 zzz
+      // 睡觉 zzz（用户裁定 2026-10-27：zzz 属图形符号、不属于文字，保留）
       if (state === 'sleep') {
         ctx.fillStyle = INK;
         for (let i = 0; i < 3; i++) {
@@ -618,6 +632,7 @@ export async function createSpriteSkin(assets: SkinAssetsV2, opts: SpriteSkinOpt
         ctx.fill();
         ctx.restore();
       }
+      ctx.restore(); // 亚像素平移
     },
   };
 }

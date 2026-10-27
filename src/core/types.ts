@@ -215,6 +215,36 @@ export interface WeeklyReportPayload {
   dateStr: string;
 }
 
+/**
+ * 每日复盘清单（用户裁定 2026-10-27）：每天 17:30 弹窗的日常内容——
+ * 今天做了什么、各回血多少（任务完成 = 成就感回血，正值语义，见 TASK_COMPLETE_PREDICTED）。
+ * 周五 requireAck 的确认弹窗仍为周报手账（AI 建议 + 决策留痕）。
+ */
+export interface DailyRecapItem {
+  kind: 'task' | 'recovery';
+  name: string;
+  /** 带符号精力变化（actual_delta） */
+  delta: number;
+  at: number;
+}
+
+export interface DailyRecap {
+  /** YYYY-MM-DD */
+  date: string;
+  /** 当日明细（时间正序）：任务完成 + 恢复项 */
+  items: DailyRecapItem[];
+  tasksCompleted: number;
+  /** 任务回血合计 */
+  taskGain: number;
+  recoveriesTaken: number;
+  /** 恢复回血合计 */
+  recoverGain: number;
+  /** 当日开盘精力（前日收盘延续，全量 fold） */
+  openEnergy: number;
+  closeEnergy: number;
+  netChange: number;
+}
+
 /* ─────────────────────────── 窗口 ─────────────────────────── */
 
 export type WindowMode = 'pet' | 'panel';

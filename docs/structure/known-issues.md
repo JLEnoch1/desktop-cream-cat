@@ -24,14 +24,13 @@
 
 | 位置 | 注释/文档称 | 实际实现 | 影响 |
 |---|---|---|---|
-| `src/emotion/engine.ts:6` | 文件头「pulse：精力 **< 6** 时激活」 | `PULSE_THRESHOLD = 3`（:58），`resolve()` 用 `energy < 3` | **注释仍未修**（v1.3 复核：原文尚在）。同文件与 `tests/core.test.ts` 均确认为 3 |
-| `src/core/types.ts:57` | `PulseReaction` 上方「pulse 层情绪反应（**<6 分**激活）」 | 同上，实际阈值 3 | **注释错误，仍未修** |
-| `overview.md`（工作区根） | 「测试 **30/30** 全绿」、「pulse（**<6** 激活）」 | 实测 **106/106**；阈值 3 | **历史文档，已严重过期**。不作待办来源，也不反映当前状态 |
-| `src/renderer/pet.ts:238` 附近 `injure()` 注释 | 「未来若要接线，触发源必须是**领域事件**（如连续拒绝恢复建议）」 | 2026-10-22 **用户裁决推翻此预留**：不接线 + 领域层除名（DESIGN.md §5.4）。📌 **DESIGN.md 红线 R10/R11 措辞已于 v1.4 修订**（用户 11:49 批准）：R11 现写「跌倒态…**永不**由任何用户行为序列触发（手势、连点、拖动、拒绝计数均不可）」，"仅可由领域事件触发"的悬空许可已从契约中消除 | 🔴 **仅剩这行源码注释未跟进**：它仍邀请实现者去做已被原则性否决的事（影子计数器 = 暗中监视 / RSD 流失引信）。T0 与 v1.4 均只改 .md，**源码注释待 T12 实现时随 `injure()` 改名一并清除** |
-| `src/main/index.ts` `buildTrayIcon()` | 裁决文档提及托盘应为「64px 猫」 | 实测 size=**16** 的暖黄**纯色圆点**，不是猫 | ⚠️ Q11：裁决的"64px"不对应任何实际尺寸（身体直径 104–116px）。T13 需澄清基准 |
+| `src/emotion/engine.ts:6` | 文件头「pulse：精力 **< 6** 时激活」 | 原 `PULSE_THRESHOLD = 3`（:58），`resolve()` 用 `energy < 3` | ✅ **本条消解（2026-10-22 Q1 裁决）**：门槛废除、全档激活，文件头注释已随之改写（「pulse：全档激活，强度由 pulse-contract 调制」） |
+| `src/core/types.ts:57` | `PulseReaction` 上方「pulse 层情绪反应（**<6 分**激活）」 | 同上，实际阈值曾为 3 | ⚠️ 门槛已废除；该注释若仍含「<6 分激活」表述待随下轮注释清扫核对（`grep -n "激活" src/core/types.ts`） |
+| `overview.md`（工作区根） | 「测试 **30/30** 全绿」、「pulse（**<6** 激活）」 | 实测 **152/152**（2026-10-23）；门槛已废除 | **历史文档，已严重过期**。不作待办来源，也不反映当前状态 |
+| ~~`src/renderer/pet.ts` `injure()` 注释预留~~ | 「未来若要接线，触发源必须是**领域事件**」 | ✅ **本条消解**：B 车道已删除该注释并改名 `pratfall()`（main `1557490`）；裁决明确**永不接线**（DESIGN.md §5.4 / R11 修订版），强意图手势为唯一触发源 | 无残留（`grep -rn injur src/` = 0） |
+| `src/main/index.ts` `buildTrayIcon()` | 裁决文档提及托盘应为「64px 猫」 | 实测 size=**16** 的暖黄**纯色圆点**，不是猫 | ⚠️ Q11：裁决的"64px"不对应任何实际尺寸（身体直径 104–116px）。**仍待澄清** |
 
-> 注：`PULSE_THRESHOLD = 3` 与 `energyBand()` 的 low 档（<3）是对齐的，实现自洽；错的只是注释。
-> 🔴 该常量是红线（DESIGN.md §4.3 / TASKS.md Q1），**勿自行调整**。
+> 注（2026-10-23 更新）：pulse 激活门槛已废除（Q1 裁决），`energyBand()` 的 low 档（<3）仍用于 composite 查表，两者不再有关联。原「该常量是红线勿自行调整」提示随常量火化而失效。
 
 ## 5.2 已定义但无调用方的公开 API（v1.3 逐条重测）
 
@@ -49,12 +48,12 @@
 | `TaskCenter.overdueCount()` | `task/center.ts:133` | **无调用方**。pulse 的 `guilty` 信号由 `extractPulseSignals()` 自行从事件流计算 `overdueTasks`，未经此方法 |
 | `PetRenderer.clearPreview()` | `renderer/pet.ts:222` | 无调用方。`app.ts:hideSlide()` 改用 `applyEmotion(state.emotion)` 恢复 |
 | ~~`PetRenderer.applyOverlay()`~~ | `renderer/pet.ts:226` | ✅ **已有调用方**：`app.ts:1175` `pet.applyOverlay(s.emotion.overlay)`（v1.3 更正） |
-| `PetRenderer.injure()` | `renderer/pet.ts:262` | 🔴 **无调用方，且已裁决永久除名**（不是"未来扩展预留"）。见 §5.1 末行与 DESIGN.md §5.4 / TASKS.md T12 |
+| ~~`PetRenderer.injure()`~~ | ~~`renderer/pet.ts:262`~~ | ✅ **已除名交付**：改名 `pratfall()`（main `1557490`），仅由 `isPratfallGesture()` 强意图手势触发；不再是"无调用方 API"，也不再是预留 |
 | `TASK_ABS_MAX` / `RECOVERY_ABS_MAX` | `task/center.ts:26`、`recovery/deck.ts:26` | 均 = 5，无调用方。实际 `PendingSlide.absMax` 直接取 `ENERGY_MAX` |
 | `resolveTailPose()` / `resolveEarPose()` | `renderer/pet.ts:101`、`:124` | ✅ **不是死代码**：被 `drawTail()`/`render()` 调用，且由 `tests/pose.test.ts` 直测（导出是为了可测性） |
 
 > 这些多为测试可达性或未来扩展预留。列出是为了避免后续对话误以为它们在主链路上。
-> ⚠️ **例外**：`injure()` 已裁决删除，不要把它当"预留 API"接线。
+> ⚠️ **例外（历史留档）**：旧名 `injure()` 已裁决删除并交付改名 `pratfall()`（2026-10-23），不要把它当"预留 API"接线，也不要在源码里复活旧名。
 
 ## 5.3 有意的重复定义（非缺陷，勿"修复"）
 

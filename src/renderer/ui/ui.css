@@ -256,10 +256,11 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
 .s-actions { display: flex; gap: 8px; margin-top: 12px; }
 .s-actions .btn { flex: 1; padding: 10px 0; font-size: 13px; }
 
-/* ── 皇室书信卡（晨间基线 / 临时调节共用布局；配色沿用奶油 token） ──
+/* ── 皇室书信卡（临时调节卡布局；晨间基线已改「单题三选」，见下方独立块） ──
    信头：居中徽记 + 问候语（rm-head 墨线排版的书信转译）→ 双细线分隔 →
    正文：印章式精力徽记（大数字 + Δ 火漆角标）→ 参考信息框（rm-note 同款）→
-   滑轨节标题（rm-sec h3 薄荷下划线）→ 附言横线 → 落款区（猫爪火漆印 + 右对齐按钮）。 */
+   滑轨节标题（rm-sec h3 薄荷下划线）→ 附言横线 → 落款区（猫爪火漆印 + 右对齐按钮）。
+   配色沿用奶油 token。 */
 
 /* 卡面内衬细框：正式书信的证书感（伪元素穿透指针，不影响交互与命中区） */
 #slide-card::before {
@@ -273,6 +274,53 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
 
 /* 晨间基线：薄荷奶油渐层（日出意象的奶油转译） */
 #slide-card.morning { background: linear-gradient(168deg, var(--mint-soft) 0%, var(--card) 40%); }
+
+/* ── 晨间单题三选（ADHD 降噪 · 用户裁决 2026-10-27 第二轮） ──
+   晨间卡只剩「一行问题 + 三个大按钮」：点一下 = 确认 = 关闭
+   （ui-app quickMorning → slideConfirm(昨日收尾 ±1.5/0)，晨间基线唯一写入点不变）。
+   信头/印章/滑轨系/附言/落款/内衬框全部让位。DOM 不删：manual 书信卡共用同一套
+   结构，且 showSlide() 对这些节点有写入契约（隐藏节点照常接受写入，不报错）。
+   早安问候由猫的 greeting 动作承担（气泡已按「头顶零文字」原则移除，纯身体语言）；
+   不想答按 Esc（=「先不了」语义，cancelSlide 不追打扰）。 */
+#slide-card.morning::before,
+#slide-card.morning .s-crest,
+#slide-card.morning .s-title,
+#slide-card.morning .s-sub,
+#slide-card.morning .s-rule,
+#slide-card.morning .s-seal-wrap,
+#slide-card.morning .s-predicted,
+#slide-card.morning .s-sec-h,
+#slide-card.morning .slider-track,
+#slide-card.morning .slider-labels,
+#slide-card.morning .s-note,
+#slide-card.morning .s-sign { display: none; }
+
+.s-quick { display: none; }
+#slide-card.morning .s-quick { display: block; }
+#slide-card .s-q {
+  text-align: center;
+  font-size: 13.5px; font-weight: 800; letter-spacing: .03em;
+  color: var(--ink);
+  margin: 2px 0 14px;
+}
+#slide-card .s-q-opts { display: flex; gap: 10px; }
+#slide-card .s-q-btn {
+  flex: 1;
+  padding: 15px 0 14px;
+  font-family: var(--font);
+  font-size: 14.5px; font-weight: 800; letter-spacing: .04em;
+  border: 2px solid var(--stroke);
+  border-radius: var(--r-item);
+  cursor: pointer;
+  box-shadow: 3px 3px 0 rgba(32, 36, 42, .12);
+  transition: transform .16s cubic-bezier(.16, 1, .3, 1), box-shadow .16s;
+}
+#slide-card .s-q-btn:hover { transform: translateY(-1px); box-shadow: 4px 5px 0 rgba(32, 36, 42, .12); }
+#slide-card .s-q-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(32, 36, 42, .12); }
+/* 三档配色复用 Δ 语义色（砖红=负 / 奶油=平 / 薄荷=正），不引入新色 */
+#slide-card .s-q-btn.low  { background: rgba(201, 111, 90, .12); color: var(--brick); }
+#slide-card .s-q-btn.same { background: var(--card); color: var(--ink); }
+#slide-card .s-q-btn.high { background: var(--mint-soft); color: var(--green-hi); }
 
 /* 临时调节（仅预览）：纸底 + 墨线虚线边框，暗示「不落库」——像一封书信草稿 */
 #slide-card.manual {
@@ -450,7 +498,9 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
    已迁移到 catWin（src/renderer/cat/cat.css 同名块）：
    精力值绑定在桌宠下方，悬浮显示——本窗口不再持有 HUD。 */
 
-/* ─────────────────────────── 任务面板（panel 模式） ─────────────────────────── */
+/* ─────────────────────────── 任务面板（panel 模式 · 手账羊皮纸） ───────────────────────────
+   用户裁定 2026-10-27：精力任务消耗清单换「今日复盘清单」同款手账样式
+   （羊皮纸 + 茶渍 + 棕墨楷体 + 火漆徽记）。布局与交互不动，只换纸面色。 */
 
 #panel {
   position: absolute;
@@ -459,10 +509,16 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   transform: translateX(-50%) translateY(14px) scale(.97);
   width: 366px;
   max-height: calc(100vh - 104px);
-  background: var(--card);
-  border: 2px solid var(--stroke);
+  background-color: #efe0bd;
+  background-image:
+    radial-gradient(ellipse 64px 42px at 88% 4%, rgba(155, 115, 55, .14), transparent 70%),
+    radial-gradient(ellipse 52px 38px at 6% 42%, rgba(150, 110, 52, .12), transparent 70%),
+    radial-gradient(ellipse 60px 40px at 70% 96%, rgba(160, 120, 60, .10), transparent 72%);
+  border: 1.5px solid rgba(135, 100, 50, .55);
   border-radius: var(--r-card);
-  box-shadow: var(--card-shadow);
+  box-shadow: 5px 7px 14px rgba(60, 40, 10, .28), inset 0 0 0 1px rgba(255, 250, 228, .35);
+  font-family: "Kaiti SC", "KaiTi", "STKaiti", "DFKai-SB", serif;
+  color: #3f2c17; /* 深棕墨迹 */
   opacity: 0;
   pointer-events: none;
   transition: opacity .28s ease, transform .28s cubic-bezier(.16,1,.3,1);
@@ -482,27 +538,36 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   align-items: center;
   gap: 10px;
   padding: 14px 16px 11px;
-  border-bottom: 2px solid var(--line);
+  border-bottom: 2px solid rgba(120, 88, 42, .4);
 }
 .panel-head .mark {
   width: 34px; height: 34px;
   border-radius: 11px;
-  background: var(--green-deep);
-  border: 2px solid var(--stroke);
+  /* 火漆徽记（同周手账火漆印色系） */
+  background: radial-gradient(circle at 34% 30%, #b5493a, #7e2418 62%, #611609 100%);
+  border: 1.5px solid rgba(90, 20, 10, .55);
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  box-shadow: 2px 2px 0 rgba(32, 36, 42, .14);
+  box-shadow: 0 2px 5px rgba(60, 20, 10, .35), inset 0 0 0 2px rgba(255, 220, 200, .18);
 }
 .panel-head .head-txt { flex: 1; min-width: 0; }
-.panel-head h1 { font-size: 15px; font-weight: 800; letter-spacing: .01em; color: var(--ink); }
+.panel-head h1 { font-size: 16px; font-weight: 700; letter-spacing: 2px; color: #4a3319; }
 .panel-head .sub {
   font-size: 11px;
-  color: var(--muted);
+  color: rgba(105, 80, 46, .9);
   margin-top: 2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* 面板内按钮/收起钮：棕墨适配 */
+#panel-close { color: #6b4a22; }
+#panel-close:hover { color: #3f2c17; }
+#task-add-btn.btn {
+  background: linear-gradient(135deg, #e0a545, #b97a1e);
+  border-color: rgba(120, 88, 42, .55);
+  color: #fffaf0;
 }
 
 .panel-body {
@@ -510,10 +575,10 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   padding: 12px 14px 14px;
   flex: 1;
   scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  scrollbar-color: rgba(120,90,45,.35) transparent;
 }
 .panel-body::-webkit-scrollbar { width: 5px; }
-.panel-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.panel-body::-webkit-scrollbar-thumb { background: rgba(120,90,45,.35); border-radius: 3px; }
 
 .tab-page { display: none; }
 .tab-page.active { display: block; animation: fadeUp .25s cubic-bezier(.16,1,.3,1); }
@@ -529,17 +594,17 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   flex: 1;
   min-width: 0;
   padding: 9px 11px;
-  border: 2px solid var(--stroke-soft);
+  border: 1.5px solid rgba(120, 90, 45, .5);
   border-radius: 10px;
-  font-size: 12px;
-  font-family: var(--font);
-  color: var(--ink);
+  font-size: 12.5px;
+  font-family: inherit;
+  color: #3f2c17;
   outline: none;
-  background: var(--card);
+  background: rgba(255, 250, 235, .6);
   transition: border-color .15s, box-shadow .15s;
 }
-.task-add input::placeholder { color: var(--faint); }
-.task-add input:focus { border-color: var(--stroke); box-shadow: 0 0 0 3px rgba(174, 199, 166, .4); }
+.task-add input::placeholder { color: rgba(105, 80, 46, .5); }
+.task-add input:focus { border-color: #8a6a38; box-shadow: 0 0 0 3px rgba(170, 110, 40, .3); }
 .task-add .cost { flex: 0 0 auto; width: 54px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* ── 任务列表 ── */
@@ -548,27 +613,28 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   align-items: center;
   gap: 9px;
   padding: 10px 12px;
-  background: var(--paper);
-  border: 1.5px solid var(--stroke-soft);
+  background: rgba(255, 250, 235, .5);
+  border: 1px solid rgba(120, 90, 45, .4);
   border-radius: var(--r-item);
   margin-bottom: 8px;
   transition: border-color .2s, transform .2s;
   animation: fadeUp .25s cubic-bezier(.16,1,.3,1);
 }
-.task-item:hover { border-color: var(--stroke); transform: translateY(-1px); }
-.task-item .t-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.task-item:hover { border-color: rgba(120, 88, 42, .75); transform: translateY(-1px); }
+.task-item .t-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: #3f2c17; }
 .task-item .t-dur {
   display: block;
   font-size: 9.5px;
-  font-weight: 500;
-  color: var(--muted);
+  font-weight: 400;
+  color: rgba(105, 80, 46, .75);
   margin-top: 1px;
 }
+/* 精力消耗徽标：手账墨色小胶囊 */
 .task-item .t-cost {
   font-size: 10.5px;
-  color: var(--ink-soft);
-  background: var(--mint-soft);
-  border: 1px solid rgba(46, 83, 65, .25);
+  color: #6b4a22;
+  background: rgba(230, 205, 150, .55);
+  border: 1px solid rgba(150, 105, 45, .55);
   padding: 2px 8px;
   border-radius: 999px;
   font-variant-numeric: tabular-nums;
@@ -577,280 +643,349 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
 .task-item.done { opacity: .5; }
 .task-item.done .t-title { text-decoration: line-through; }
 .task-item.done .t-dur { text-decoration: none; }
-.task-item.overdue { border-color: rgba(201, 111, 90, .65); }
-.task-item .overdue-tag { font-size: 9.5px; color: var(--brick); font-weight: 800; flex: 0 0 auto; }
+.task-item.overdue { border-color: rgba(180, 70, 50, .7); }
+.task-item .overdue-tag { font-size: 9.5px; color: #8a3a24; font-weight: 700; flex: 0 0 auto; }
 .empty {
   text-align: center;
-  color: var(--muted);
+  color: rgba(105, 80, 46, .8);
   font-size: 12px;
   line-height: 1.8;
   padding: 24px 8px;
 }
 
-/* ─────────────────────────── 精力恢复扇形菜单（径向 chips） ───────────────────────────
-   - #recovery-pop 是 inset:0 全屏**穿透容器**（pointer-events 永远 none），
-     只有 .rp-chip 自身接管指针，否则整窗永久不可穿透。
-   - 圆心 (--cx/--cy) = 窗口底部中心（猫不在本窗口），JS 打开/resize 时写入。
-   - chip 定位用 rotate(θ) → translateY(-R) → rotate(-θ) 三段变换：
-     既落到环上，又让 chip 自身保持正向。隐藏态 translateY 归零 + scale(.2)，
-     显示态展开 —— 同一 transform 函数列表逐项插值 = 径向弹出动画。 */
-
+/* ─────────────────────────── 精力恢复清单（侧旁手账面板 · 3 行 × 2 列） ───────────────────────────
+   用户裁定 2026-10-27（二次修订）：**不要 uiWin 左侧常驻圆钮**——入口就是猫下面
+   HUD 胶囊里的 ⚡（catWin #hud-recovery → cat:openEntry → openRecoveryMenu → ui:cmd
+   openRecovery，开关切换）。6 个恢复项按「2 个一排」共 3 行排在羊皮纸面板里，
+   面板贴 uiWin 左缘（= 紧邻猫一侧）垂直居中展开。
+   - #recovery-pop 仍是 inset:0 全屏**穿透容器**（pointer-events 永远 none），
+     只有 .rp-panel 自身接管指针（click-through 红线）。
+   - 热区整报面板：collectHotRects 只在 show 态 push .rp-panel（覆盖 chips 与收起钮）。 */
 #recovery-pop {
   position: absolute;
   inset: 0;
-  --cx: 200px;                    /* 窗口底部中心（JS 实时写入） */
-  --cy: calc(100vh - 120px);
-  --r: 126px;                     /* 环半径：chip 中心到圆心的距离 */
   pointer-events: none;
   opacity: 0;
   z-index: 21; /* 高于 slide-card(20)，低于 adjust-card(22) */
+  transition: opacity .22s ease;
 }
 #recovery-pop.show {
   opacity: 1;
-  pointer-events: none; /* 容器永远不接管指针，只有 chip 接管 */
+  pointer-events: none; /* 容器永远不接管指针，只有面板接管 */
 }
 
-.rp-ring {
+/* 手账面板：贴 uiWin 左缘（= 紧邻猫一侧）、垂直居中展开；入口 = 猫 HUD 的 ⚡。
+   羊皮纸 + 茶渍 + 棕墨楷体 */
+.rp-panel {
   position: absolute;
-  left: var(--cx);
-  top: var(--cy);
-  width: 0;
-  height: 0;
-}
-
-/* 精力清单 chip：纯文字胶囊（无图标、无默认值徽标；用户裁决 2026-10-26）。
-   宽度随名称自适应，环形定位靠 transform 末端 translate(-50%,-50%) 居中到扇区落点。 */
-.rp-ring .rp-chip {
-  position: absolute;
-  left: 0;
-  top: 0;
-  min-width: 62px;
-  max-width: 130px;
-  height: 38px;
-  padding: 0 15px;
-  border-radius: 999px;
-  background: var(--card);
-  border: 2.5px solid var(--stroke);
-  box-shadow: var(--hard), 0 10px 22px rgba(23, 37, 29, .18);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* 收起态：贴回圆心 + 缩小（弹出动画的起点） */
-  transform: rotate(var(--ang)) translateY(0) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(.2);
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%) translateX(-8px) scale(.94);
+  width: 252px;
+  padding: 11px 13px 14px;
+  background-color: #efe0bd;
+  background-image:
+    radial-gradient(ellipse 54px 34px at 84% 8%, rgba(155, 115, 55, .16), transparent 70%),
+    radial-gradient(ellipse 44px 30px at 8% 72%, rgba(150, 110, 52, .14), transparent 70%),
+    radial-gradient(circle 2px at 30% 20%, rgba(135, 96, 46, .18), transparent 100%),
+    radial-gradient(circle 1.5px at 72% 56%, rgba(135, 96, 46, .15), transparent 100%);
+  border: 1.5px solid rgba(135, 100, 50, .55);
+  border-radius: 12px;
+  box-shadow: 5px 7px 14px rgba(60, 40, 10, .3), inset 0 0 0 1px rgba(255, 250, 228, .4);
+  font-family: "Kaiti SC", "KaiTi", "STKaiti", "DFKai-SB", serif;
+  color: #3f2c17; /* 深棕墨迹 */
   opacity: 0;
   pointer-events: none;
+  transition: opacity .24s ease, transform .28s cubic-bezier(.16,1,.3,1);
+}
+#recovery-pop.show .rp-panel {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0) scale(1);
+  pointer-events: auto;
+}
+
+.rp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1.5px dashed rgba(120, 90, 45, .45);
+}
+/* 操作提示：面板抬头一行小字 */
+.rp-hint { font-size: 10px; color: rgba(105, 80, 46, .95); white-space: nowrap; }
+/* 收起钮：面板抬头右侧小圆钮 */
+.rp-close {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(120, 88, 42, .6);
+  background: rgba(255, 250, 235, .6);
+  color: #6b4a22;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, color .15s;
+}
+.rp-close:hover { background: #e6d3a3; color: #3f2c17; }
+
+/* 网格：2 个一排（用户裁定 2026-10-27），6 项 = 3 行 */
+.rp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 9px;
+}
+
+/* 恢复项 chip：羊皮纸胶囊、纯文字（无图标、无默认值徽标；用户裁决 2026-10-26） */
+.rp-grid .rp-chip {
+  padding: 10px 8px;
+  border-radius: 999px;
+  background: rgba(255, 250, 235, .65);
+  border: 1.5px solid rgba(120, 88, 42, .55);
+  box-shadow: 0 2px 5px rgba(80, 52, 14, .16);
+  cursor: pointer;
+  text-align: center;
+  /* 收起态：缩小 + 透明（弹出动画起点），--i 逐格错峰 */
+  opacity: 0;
+  transform: scale(.4) translateY(10px);
   transition:
     transform .3s cubic-bezier(.16, 1, .3, 1),
-    opacity .18s ease,
+    opacity .2s ease,
+    background .15s ease,
     box-shadow .2s ease;
-  transition-delay: 0s;
+  transition-delay: calc(var(--i, 0) * 40ms);
 }
-/* 展开态：落到环上、正向、可点 */
-#recovery-pop.show .rp-ring .rp-chip {
-  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(1);
+#recovery-pop.show .rp-grid .rp-chip {
   opacity: 1;
-  pointer-events: auto;
-  /* 逐项 stagger：从中间往两侧展开，像扑克牌甩出 */
-  transition-delay: calc(var(--i) * 26ms);
+  transform: scale(1) translateY(0);
 }
-.rp-ring .rp-chip:hover {
-  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(1.12);
-  box-shadow: 5px 5px 0 rgba(32, 36, 42, .14), 0 12px 26px rgba(23, 37, 29, .22);
-  transition-delay: 0s;
-  z-index: 2;
-}
-.rp-ring .rp-chip:active {
-  transform: rotate(var(--ang)) translateY(calc(-1 * var(--r))) rotate(calc(-1 * var(--ang))) translate(-50%, -50%) scale(.94);
+.rp-grid .rp-chip:hover {
+  background: #f6ead0;
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 5px 10px rgba(80, 52, 14, .24);
   transition-delay: 0s;
 }
+.rp-grid .rp-chip:active { transform: scale(.95); transition-delay: 0s; }
 /* 名称：chip 唯一内容，文字加大保证可读 */
 .rp-chip .nm {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
-  color: var(--ink);
+  letter-spacing: 1px;
+  color: #3f2c17;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1;
 }
 
-/* 中央收起钮（静态 chip，不带扇形变换） */
-#rp-close {
-  position: absolute;
-  left: var(--cx);
-  top: var(--cy);
-  width: 46px;
-  height: 46px;
-  margin: -23px 0 0 -23px;
-  border-radius: 50%;
-  background: var(--card);
-  border: 2.5px solid var(--stroke);
-  box-shadow: var(--hard), 0 8px 18px rgba(23, 37, 29, .16);
-  color: var(--ink-soft);
-  font-family: var(--font);
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transform: scale(.2);
-  opacity: 0;
-  pointer-events: none;
-  transition: transform .28s cubic-bezier(.16, 1, .3, 1), opacity .18s ease, color .15s;
-  z-index: 4;
-}
-#recovery-pop.show #rp-close {
-  transform: scale(1);
-  opacity: 1;
-  pointer-events: auto;
-  transition-delay: 90ms;
-}
-#rp-close:hover { color: var(--ink); }
-
-/* 操作提示：菜单下方一行小字（奶油气泡） */
-.rp-hint {
-  position: absolute;
-  left: 50%;
-  bottom: 64px;
-  transform: translateX(-50%) translateY(6px);
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--ink-soft);
-  background: var(--card);
-  border: 2px solid var(--stroke);
-  border-radius: 999px;
-  padding: 4px 13px;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  box-shadow: 3px 3px 0 rgba(32, 36, 42, .1);
-  transition: opacity .24s ease .1s, transform .24s ease .1s;
-}
-#recovery-pop.show .rp-hint {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-
-/* 长按 chip 查看默认值历史：径向容器里居中浮出一张奶油卡 */
+/* 长按 chip 查看默认值历史：面板中浮出一张羊皮纸小卡 */
 #recovery-pop #version-slot {
   position: absolute;
   left: 50%;
-  top: 24%;
+  top: 44px;
   transform: translateX(-50%);
-  width: 244px;
+  width: 224px;
   pointer-events: auto;
   z-index: 5;
 }
 .version-pop {
   padding: 11px 13px;
-  background: var(--card);
-  border: 2px solid var(--stroke);
-  border-radius: 14px;
-  box-shadow: var(--card-shadow);
+  background: #f1e4c3;
+  border: 1.5px solid rgba(120, 88, 42, .6);
+  border-radius: 10px;
+  box-shadow: 4px 6px 12px rgba(60, 40, 10, .3);
   font-size: 11px;
-  color: var(--ink-soft);
+  color: #5a4326;
   animation: fadeUp .22s cubic-bezier(.16,1,.3,1);
 }
-.version-pop h4 { font-size: 12px; margin-bottom: 6px; color: var(--ink); font-weight: 800; }
+.version-pop h4 { font-size: 12px; margin-bottom: 6px; color: #4a3319; font-weight: 700; }
 .version-pop .vrow {
   display: flex; justify-content: space-between; gap: 8px;
   padding: 4px 0;
-  border-bottom: 1px dashed var(--line);
+  border-bottom: 1px dashed rgba(120, 90, 45, .35);
 }
 .version-pop .vrow:last-child { border-bottom: none; }
-.version-pop .vrow b { color: var(--green-hi); font-variant-numeric: tabular-nums; }
+.version-pop .vrow b { color: #2f6b46; font-variant-numeric: tabular-nums; }
 
-/* ─────────────────────────── 周报弹窗（奶油纸感手账） ─────────────────────────── */
+/* ─────────────────────────── 复盘/周报弹窗（魔法信件：羊皮纸 + 羊毛卷 + 火漆印 + 金尖羽毛笔） ───────────────────────────
+   用户裁定 2026-10-27：手账样式恢复初版设计（git 73c6d87 styles.css 959-1239 原样移植）。
+   纯 CSS（CSP 禁外链）：
+   - 上下「羊毛卷」卷筒：横向渐变模拟圆柱体明暗（高光在 1/3 处）+ 两端圆头
+   - 纸面：多层 radial-gradient 做旧斑驳（茶渍/霉点），米黄羊皮纸底 + 不规则毛边
+   - 火漆印：按钮行左侧深红圆章，双环描边 + 内嵌「封」字，微旋转
+   - 金尖羽毛笔：白羽杆 + 雕花金尖，斜搁纸面；JS 把笔尖钉在最后一行墨迹末尾（像刚写完）
+   - 正文楷体/衬线，行距对齐纸面格线 */
 
 #report-modal {
   position: absolute;
   left: 50%;
-  top: 18px;
-  transform: translateX(-50%) translateY(10px) scale(.98);
-  width: 356px;
+  top: 24px;
+  transform: translateX(-50%) translateY(10px) rotate(-.5deg);
+  width: 344px;
+  max-height: calc(100vh - 40px);
   display: flex;
   opacity: 0;
   pointer-events: none;
   transition: opacity .28s ease, transform .28s cubic-bezier(.16,1,.3,1);
-  z-index: 23; /* 每日弹窗：最高层，但让位给 toast(50) */
+  z-index: 23; /* 每日弹窗：最高层，但让位给系统级 toast(50) */
 }
 #report-modal.show {
   opacity: 1;
   pointer-events: auto;
-  transform: translateX(-50%) translateY(0) scale(1);
+  transform: translateX(-50%) translateY(0) rotate(-.5deg);
 }
 
+/* 卷轴整体：上下卷筒 + 中间纸面 */
+.rm-scroll {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  filter: drop-shadow(5px 7px 10px rgba(60, 40, 10, 0.28));
+}
+
+/* 米色褶皱卷筒：圆柱明暗 + 竖向褶皱条纹 + 斑驳纸斑 + 两端撕裂卷边（对齐参考图质感） */
+.rm-roll {
+  height: 24px;
+  flex: 0 0 auto;
+  background:
+    /* 竖向褶皱：明暗相间的细条纹，模拟卷纸折痕 */
+    repeating-linear-gradient(97deg,
+      rgba(120, 90, 45, 0) 0 7px,
+      rgba(120, 90, 45, .17) 7px 9px,
+      rgba(255, 246, 220, .30) 9px 12px,
+      rgba(120, 90, 45, 0) 12px 19px),
+    /* 斑驳纸斑 */
+    radial-gradient(ellipse 44px 15px at 18% 42%, rgba(150, 115, 60, .20), transparent 70%),
+    radial-gradient(ellipse 56px 16px at 66% 58%, rgba(150, 115, 60, .16), transparent 70%),
+    radial-gradient(ellipse 30px 12px at 88% 35%, rgba(150, 115, 60, .14), transparent 70%),
+    /* 圆柱明暗：高光在 1/3 处 */
+    linear-gradient(to bottom,
+      #9c7a45 0%, #d9bd85 16%, #f6ead0 36%, #ecd9ac 58%, #c3a066 82%, #8a6a38 100%);
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px 2px rgba(255, 250, 228, .8),
+    inset 0 -3px 5px rgba(80, 52, 14, .45),
+    0 2px 4px rgba(80, 52, 14, .25);
+  position: relative;
+  z-index: 2;
+  /* 两端撕边：不规则锯齿轮廓 = 卷边撕口感 */
+  clip-path: polygon(
+    1.5% 20%, 4% 5%, 11% 0%, 50% 2%, 89% 0%, 96% 4%, 99% 18%,
+    100% 50%, 98.5% 83%, 95% 97%, 88% 100%, 50% 98%, 12% 100%, 5% 96%, 1% 82%, 0% 50%
+  );
+}
+.rm-roll.top { margin: 0 6px; }
+.rm-roll.bottom { margin: 0 6px; }
+
+/* 羊皮纸纸面：撕角轮廓 + 褶皱光影 + 茶渍霉斑 + 纤维纹 + 毛边内阴影 */
 .rm-sheet {
   width: 100%;
-  max-height: calc(100vh - 116px);
+  max-height: calc(100vh - 128px);
   overflow-y: auto;
-  background: var(--card);
-  border: 2px solid var(--stroke);
-  border-radius: var(--r-card);
-  box-shadow: var(--card-shadow);
-  padding: 16px 18px 18px;
+  margin: -3px 10px; /* 塞进卷筒下方，露出衔接 */
+  background-color: #efe0bd;
+  background-image:
+    /* 斜向褶皱光影（极淡，模拟纸张起伏） */
+    repeating-linear-gradient(104deg,
+      rgba(140, 105, 55, 0) 0 46px,
+      rgba(140, 105, 55, .055) 46px 52px,
+      rgba(255, 248, 226, .10) 52px 58px,
+      rgba(140, 105, 55, 0) 58px 104px),
+    /* 茶渍斑块 */
+    radial-gradient(ellipse 64px 42px at 82% 10%, rgba(155, 115, 55, .17), transparent 70%),
+    radial-gradient(ellipse 48px 36px at 10% 66%, rgba(150, 110, 52, .15), transparent 70%),
+    radial-gradient(ellipse 74px 52px at 58% 94%, rgba(160, 120, 60, .12), transparent 72%),
+    radial-gradient(ellipse 34px 26px at 34% 30%, rgba(150, 112, 55, .10), transparent 70%),
+    /* 霉点细斑 */
+    radial-gradient(circle 2px at 24% 22%, rgba(135, 96, 46, .20), transparent 100%),
+    radial-gradient(circle 1.5px at 70% 40%, rgba(135, 96, 46, .18), transparent 100%),
+    radial-gradient(circle 2px at 44% 78%, rgba(135, 96, 46, .16), transparent 100%),
+    radial-gradient(circle 1px at 86% 58%, rgba(135, 96, 46, .16), transparent 100%),
+    radial-gradient(circle 1.5px at 14% 88%, rgba(135, 96, 46, .14), transparent 100%),
+    /* 极淡横向格线（手账内页感） */
+    repeating-linear-gradient(to bottom, transparent 0 27px, rgba(115, 86, 42, 0.10) 27px 28px);
+  border-left: 1px solid rgba(135, 100, 50, .45);
+  border-right: 1px solid rgba(135, 100, 50, .45);
+  /* 撕角：四角与左右缘的不规则撕裂轮廓 */
+  clip-path: polygon(
+    3.5% 0%, 62% .6%, 96% 0%, 100% 4%, 99.2% 30%, 100% 62%, 98.6% 92%, 96.5% 100%,
+    60% 99.4%, 26% 100%, 3% 99.6%, 0% 95%, .9% 68%, 0% 34%, 1.2% 6%
+  );
+  box-shadow: inset 7px 0 12px -7px rgba(88, 58, 18, .38), inset -7px 0 12px -7px rgba(88, 58, 18, .38);
+  padding: 18px 18px 26px;
+  font-family: "Kaiti SC", "KaiTi", "STKaiti", "DFKai-SB", serif;
+  color: #3f2c17; /* 深棕墨迹 */
+  position: relative;
+  z-index: 1;
   scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  scrollbar-color: rgba(120,90,45,.35) transparent;
 }
-.rm-sheet::-webkit-scrollbar { width: 5px; }
-.rm-sheet::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.rm-sheet::-webkit-scrollbar { width: 6px; }
+.rm-sheet::-webkit-scrollbar-thumb { background: rgba(120,90,45,.35); border-radius: 3px; }
 
-.rm-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-  padding-bottom: 9px;
-  border-bottom: 2px solid var(--line);
+.rm-head { position: relative; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid rgba(120, 88, 42, .4); }
+.rm-head h2 {
+  font-size: 18px; font-weight: 700; letter-spacing: 2px;
+  color: #4a3319; /* 深棕墨迹 */
+  transform: rotate(-.6deg);
 }
-.rm-head h2 { font-size: 17px; font-weight: 800; letter-spacing: .04em; color: var(--green-deep); }
-.rm-head .rm-sub { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+.rm-head .rm-sub { font-size: 10.5px; color: rgba(105, 80, 46, .95); margin-top: 3px; }
+.rm-head .icon-btn { position: absolute; right: -4px; top: -8px; }
 
-/* 清单条目：墨线小方勾 + 文案（数据全部来自事件流 fold） */
+/* 清单条目：火漆小方章 + 文案（数据全部来自事件流 fold） */
 .rm-list { list-style: none; }
 .rm-list li {
   display: flex; align-items: baseline; gap: 8px;
-  font-size: 12.5px; line-height: 27px;
-  color: var(--ink);
-  border-bottom: 1px dashed var(--line);
+  font-size: 12.5px; line-height: 28px; /* 与纸面格线对齐 */
+  border-bottom: 1px dashed rgba(120, 90, 45, .35);
 }
 .rm-list li:last-child { border-bottom: none; }
 .rm-list li .tick {
   flex: 0 0 auto;
   width: 13px; height: 13px; margin-top: 7px;
-  border: 1.6px solid var(--stroke-soft);
-  border-radius: 4px;
+  border: 1.4px solid rgba(110, 78, 38, .65);
+  border-radius: 3px 4px 3px 5px;
   position: relative;
   transform: rotate(-2deg);
-  background: var(--mint-soft);
+  background: rgba(255, 250, 235, .5);
 }
 .rm-list li .tick::after {
   content: "";
-  position: absolute; left: 2px; top: 1.5px;
+  position: absolute; left: 2px; top: 1px;
   width: 7px; height: 5px;
-  border-left: 1.8px solid var(--green-deep);
-  border-bottom: 1.8px solid var(--green-deep);
+  border-left: 1.6px solid #4a3319;
+  border-bottom: 1.6px solid #4a3319;
   transform: rotate(-48deg);
 }
-.rm-list li .val { margin-left: auto; font-weight: 800; color: var(--green); white-space: nowrap; font-variant-numeric: tabular-nums; }
-
+.rm-list li b { font-weight: 700; color: #3f2c17; }
+.rm-list li .val { margin-left: auto; font-weight: 700; color: #4a3319; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .rm-sec { margin-top: 12px; }
 .rm-sec h3 {
-  font-size: 12.5px; font-weight: 800; letter-spacing: .06em;
+  font-size: 12.5px; font-weight: 700; letter-spacing: .5px;
   display: inline-block;
-  color: var(--green-deep);
-  border-bottom: 2.5px solid var(--mint);
+  color: #6b4a22;
+  border-bottom: 2px solid rgba(170, 110, 40, .55);
+  transform: rotate(-.5deg);
   margin-bottom: 4px;
 }
-/* AI 建议：名称行 + 证据计数行 + 叙事行 成对相邻（因果链可见） */
+/* 今日明细（每日复盘清单）：时间列贴右，墨色淡一档 */
+.rm-items li .at {
+  flex: 0 0 auto;
+  font-size: 10px; font-weight: 400;
+  color: rgba(105, 80, 46, .8);
+  white-space: nowrap;
+}
+/* AI 建议：名称行 + 证据计数行 + 叙事行 成对相邻（因果链可见）——羊皮纸墨色适配 */
+.rm-ai li .val { color: #2f6b46; }
 .rm-ai .ev-row {
   line-height: 1.6;
   padding: 1px 0 2px 21px;
   font-size: 10px;
-  color: var(--muted);
+  color: rgba(105, 80, 46, .95);
   border-bottom: none;
   display: block;
 }
@@ -858,34 +993,56 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   line-height: 1.6;
   padding: 0 0 7px 21px;
   font-size: 10.5px;
-  color: var(--ink-soft);
-  border-bottom: 1px dotted var(--line);
+  color: #5a4326;
+  border-bottom: 1px dotted rgba(120, 90, 45, .4);
   display: block;
 }
 .rm-dec li .src {
-  flex: 0 0 auto;
-  font-size: 9.5px;
-  font-weight: 700;
-  padding: 1px 6px;
-  margin-top: 5px;
-  border: 1.5px solid var(--stroke-soft);
-  border-radius: 7px;
-  color: var(--ink-soft);
-  background: var(--mint-soft);
+  flex: 0 0 auto; font-size: 9.5px; padding: 1px 5px; margin-top: 6px;
+  border: 1px solid rgba(120, 90, 45, .5); border-radius: 6px 8px 6px 8px;
+  color: #6b5638; background: rgba(255, 250, 235, .6);
 }
-.rm-dec li .at { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 10px; white-space: nowrap; }
+.rm-dec li .at { margin-left: auto; color: rgba(107,86,56,.75); font-weight: 400; font-size: 10px; white-space: nowrap; }
 
 .rm-note {
-  margin-top: 12px;
-  font-size: 11.5px;
-  color: var(--ink-soft);
-  line-height: 1.75;
-  padding: 8px 10px;
-  background: var(--mint-soft);
-  border: 1.5px dashed rgba(46, 83, 65, .4);
-  border-radius: var(--r-item);
+  margin-top: 12px; font-size: 11px; color: #6b5638;
+  line-height: 1.7;
+  padding: 6px 8px;
+  background: rgba(230, 205, 150, .45);
+  border: 1px dashed rgba(150, 105, 45, .55);
+  border-radius: 8px 12px 8px 12px;
+  transform: rotate(.3deg);
 }
 .rm-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.rm-actions .btn { font-family: inherit; }
+/* 琥珀确认钮（原版 .btn.amber 的暖金渐变；ui.css 无 --accent token，显式配色） */
+.btn.amber {
+  background: linear-gradient(135deg, #e0a545, #b97a1e);
+  color: #fffaf0;
+}
+
+/* 火漆印：入流钉在按钮行左侧空白区（信末落款位），随内容滚动、永不压字 */
+.rm-seal {
+  margin-right: auto;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #b5493a, #7e2418 62%, #611609 100%);
+  color: #f3d9c4;
+  font-size: 17px;
+  font-weight: 700;
+  font-family: "Kaiti SC", "KaiTi", serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-8deg);
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 220, 200, .22),
+    inset 0 0 0 5px rgba(90, 20, 10, .5),
+    0 3px 6px rgba(60, 20, 10, .45);
+  pointer-events: none;
+  opacity: .92;
+}
 
 /* ─────────────────────────── AI 推荐卡片（堆叠） ─────────────────────────── */
 
@@ -1005,4 +1162,302 @@ input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); curso
   .rp-ring .rp-chip { min-width: 52px; max-width: 120px; height: 32px; padding: 0 11px; }
   .rp-chip .nm { font-size: 11.5px; }
   .rp-hint { bottom: 58px; }
+}
+
+/* ─────────────────────────── 手账统一覆盖（用户裁定 2026-10-27） ───────────────────────────
+   全部卡片面统一为「今日复盘清单」手账语言：羊皮纸 + 茶渍斑驳 + 棕墨楷体 + 火漆红点缀 + 琥珀按钮。
+   本块是**文件末尾的 additive 覆盖**（id 选择器天然高优先，同特异度后者胜），不改动上方任何
+   既有块——与并行会话的晨间卡改造零冲突。 */
+
+/* —— 纸面统一 —— */
+#slide-card, #adjust-card, #duration-card {
+  background-color: #efe0bd;
+  background-image:
+    radial-gradient(ellipse 64px 42px at 86% 6%, rgba(155, 115, 55, .16), transparent 70%),
+    radial-gradient(ellipse 48px 36px at 8% 58%, rgba(150, 110, 52, .14), transparent 70%),
+    radial-gradient(ellipse 60px 40px at 62% 96%, rgba(160, 120, 60, .11), transparent 72%),
+    radial-gradient(circle 2px at 26% 18%, rgba(135, 96, 46, .18), transparent 100%),
+    radial-gradient(circle 1.5px at 74% 42%, rgba(135, 96, 46, .15), transparent 100%);
+  border-color: rgba(135, 100, 50, .55);
+  color: #3f2c17;
+  font-family: "Kaiti SC", "KaiTi", "STKaiti", "DFKai-SB", serif;
+  box-shadow: 5px 7px 14px rgba(60, 40, 10, .3), inset 0 0 0 1px rgba(255, 250, 228, .35);
+}
+
+/* —— 墨色层级 —— */
+#slide-card .s-title, #adjust-card .s-title, #duration-card .s-title { color: #4a3319; }
+#slide-card .s-sub, #adjust-card .s-sub, #duration-card .s-sub,
+#slide-card .s-predicted, #slide-card .slider-labels, #adjust-card .slider-labels,
+#duration-card .d-est, #duration-card .d-row label, #duration-card .d-unit,
+#adjust-card .a-compare span { color: rgba(105, 80, 46, .95); }
+#slide-card .s-predicted .lead { color: rgba(105, 80, 46, .8); }
+#slide-card .s-predicted b, #adjust-card .a-compare b { color: #4a3319; }
+#slide-card .s-rule { border-color: rgba(120, 88, 42, .45); background: rgba(120, 88, 42, .45); }
+#slide-card .s-value.pos, #slide-card .s-delta.pos, #adjust-card .a-delta.pos { color: #2f6b46; }
+#slide-card .s-value.neg, #slide-card .s-delta.neg, #adjust-card .a-delta.neg { color: #8a3a24; }
+#slide-card .s-value.zero, #slide-card .s-delta.zero, #adjust-card .a-delta.zero { color: #6b4a22; }
+#adjust-card .a-delta { color: #6b4a22; }
+#adjust-card .a-arrow { color: rgba(105, 80, 46, .8); }
+
+/* —— 大数字火漆章（原奶油印章 → 火漆红，数字用浅米色） —— */
+#slide-card .s-seal {
+  background: radial-gradient(circle at 34% 30%, #b5493a, #7e2418 62%, #611609 100%);
+  border-color: rgba(90, 20, 10, .55);
+  box-shadow: inset 0 0 0 2px rgba(255, 220, 200, .2), 0 2px 5px rgba(60, 20, 10, .35);
+}
+#slide-card .s-seal .s-value,
+#slide-card .s-seal .s-value.pos,
+#slide-card .s-seal .s-value.neg,
+#slide-card .s-seal .s-value.zero { color: #f3d9c4; }
+#slide-card .s-seal .s-unit { color: rgba(243, 217, 196, .8); }
+
+/* —— 内联 SVG：猫头徽记 → 棕墨；猫爪火漆印 → 火漆红 —— */
+#slide-card .s-crest svg path { stroke: #4a3319; }
+#slide-card .s-crest svg circle { fill: #4a3319; }
+#slide-card .s-stamp svg ellipse,
+#slide-card .s-stamp svg circle { fill: #8a2c1c; fill-opacity: .55; }
+
+/* —— 晨间单题三选：只换色不动布局（additive 覆盖并行区块） —— */
+#slide-card .s-q { color: #4a3319; }
+#slide-card .s-q-btn {
+  background: rgba(255, 250, 235, .6);
+  border-color: rgba(120, 88, 42, .55);
+  color: #3f2c17;
+}
+#slide-card .s-q-btn:hover { background: #f6ead0; }
+#slide-card .s-q-btn.low { border-color: rgba(150, 90, 60, .65); }
+#slide-card .s-q-btn.same { border-color: rgba(120, 88, 42, .55); }
+#slide-card .s-q-btn.high { border-color: rgba(70, 110, 70, .65); }
+
+/* —— 滑轨：mint 填充 → 琥珀填充；奶油钮 → 羊皮纸钮 —— */
+input[type="range"]::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg,
+    #c98f2e 0 var(--fill, 50%),
+    rgba(120, 90, 45, .22) var(--fill, 50%) 100%);
+  box-shadow: inset 0 0 0 2px rgba(120, 88, 42, .55);
+}
+input[type="range"]::-webkit-slider-thumb {
+  background: radial-gradient(circle at 34% 30%, #fdf6e3, #e8d5a8 75%, #cdb47e);
+  border-color: #8a6a38;
+  box-shadow: 2px 2px 0 rgba(80, 52, 14, .22);
+}
+.slider-track .zero-mark { border-left-color: rgba(120, 88, 42, .65); }
+
+/* —— 附言/时长输入 → 手账输入框 —— */
+#slide-card .s-note, #adjust-card .s-note, #duration-card .d-row input {
+  background: rgba(255, 250, 235, .55);
+  border-color: rgba(120, 90, 45, .5);
+  color: #3f2c17;
+  font-family: inherit;
+}
+#slide-card .s-note::placeholder, #adjust-card .s-note::placeholder { color: rgba(105, 80, 46, .5); }
+#slide-card .s-note:focus, #adjust-card .s-note:focus, #duration-card .d-row input:focus {
+  border-color: #8a6a38;
+  box-shadow: 0 0 0 3px rgba(170, 110, 40, .28);
+}
+
+/* —— 按钮：主钮琥珀金、ghost 棕墨描边（只动颜色不动尺寸） —— */
+#slide-card .btn, #adjust-card .btn, #duration-card .btn, .rec-ai-card .btn {
+  background: linear-gradient(135deg, #e0a545, #b97a1e);
+  border-color: rgba(120, 88, 42, .55);
+  color: #fffaf0;
+  font-family: inherit;
+}
+#slide-card .btn.ghost, #adjust-card .btn.ghost, #duration-card .btn.ghost, .rec-ai-card .btn.ghost {
+  background: transparent;
+  border-color: rgba(120, 90, 45, .55);
+  color: #6b4a22;
+}
+#slide-card .btn.ghost:hover, #adjust-card .btn.ghost:hover,
+#duration-card .btn.ghost:hover, .rec-ai-card .btn.ghost:hover {
+  background: rgba(255, 250, 235, .5);
+  color: #3f2c17;
+}
+
+/* —— AI 推荐卡（猫写来的信） —— */
+.rec-ai-card {
+  position: relative;
+  background-color: #efe0bd;
+  background-image:
+    radial-gradient(ellipse 54px 34px at 84% 8%, rgba(155, 115, 55, .15), transparent 70%),
+    radial-gradient(ellipse 44px 30px at 10% 76%, rgba(150, 110, 52, .13), transparent 70%);
+  border-color: rgba(135, 100, 50, .55);
+  color: #3f2c17;
+  font-family: "Kaiti SC", "KaiTi", "STKaiti", "DFKai-SB", serif;
+  box-shadow: 4px 6px 12px rgba(60, 40, 10, .26), inset 0 0 0 1px rgba(255, 250, 228, .35);
+}
+.rec-ai-card .r-head { color: #6b4a22; }
+.rec-ai-card .r-head .dot { background: radial-gradient(circle at 34% 30%, #b5493a, #7e2418 70%); }
+.rec-ai-card .r-msg { color: #3f2c17; }
+.rec-ai-card .r-sugg { color: rgba(105, 80, 46, .95); }
+.rec-ai-card .r-sugg b { color: #2f6b46; }
+.rec-ai-card .r-edit input {
+  background: rgba(255, 250, 235, .6);
+  border-color: rgba(120, 90, 45, .5);
+  color: #3f2c17;
+  font-family: inherit;
+}
+.rec-ai-card .r-edit-hint { color: rgba(105, 80, 46, .75); }
+
+/* —— toast → 手账纸条 —— */
+#toast {
+  background: #f1e4c3;
+  border-color: rgba(120, 88, 42, .6);
+  color: #3f2c17;
+  font-family: "Kaiti SC", "KaiTi", "STKaiti", "DFKai-SB", serif;
+  box-shadow: 3px 4px 10px rgba(60, 40, 10, .28);
+}
+
+/* ── 任务面板·极简文字（用户裁定 2026-10-27：参考晨间基线卡——大按钮、尽可能少文字信号） ──
+   头部 = 信头（样式见文件末尾「任务面板·书信纸」节：猫头徽记 + 楷体标题 + 图标钮；情绪副标题仍隐藏）；
+   任务行 = 名称 + 纯数字时长 + 消耗 + 超时红点；动作 = ✓/✕ 大按钮，
+   借晨间三选同款「硬阴影 + 按压缩放」微交互语言。 */
+#panel .panel-head { justify-content: space-between; }
+#panel .panel-head .head-txt .sub { display: none; }
+
+#panel .task-add { gap: 8px; }
+#panel .task-add input[type="text"] { font-size: 14px; }
+#task-add-btn {
+  flex: 0 0 auto;
+  width: 42px; height: 42px; padding: 0;
+  font-size: 24px; font-weight: 800; line-height: 1;
+  border-radius: 12px;
+  box-shadow: 3px 3px 0 rgba(80, 52, 14, .18);
+  transition: transform .16s cubic-bezier(.16, 1, .3, 1), box-shadow .16s;
+}
+#task-add-btn:hover { transform: translateY(-1px); box-shadow: 4px 4px 0 rgba(80, 52, 14, .18); }
+#task-add-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(80, 52, 14, .18); }
+
+#panel .task-item { padding: 10px 12px; gap: 8px; }
+#panel .task-item .t-title { font-size: 14.5px; }
+#panel .task-item .t-dur { font-size: 11px; opacity: .8; }
+#panel .overdue-dot {
+  flex: 0 0 auto;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #c9583f, #8a2c1c 70%);
+  box-shadow: 0 0 0 2px rgba(180, 70, 50, .18);
+}
+#panel .task-item .btn.sm {
+  flex: 0 0 auto;
+  width: 38px; height: 38px; padding: 0;
+  font-size: 18px; font-weight: 800; line-height: 1;
+  border-radius: 11px;
+  box-shadow: 2px 2px 0 rgba(80, 52, 14, .16);
+  transition: transform .16s cubic-bezier(.16, 1, .3, 1), box-shadow .16s;
+}
+#panel .task-item .btn.sm:hover { transform: translateY(-1px); box-shadow: 3px 3px 0 rgba(80, 52, 14, .16); }
+#panel .task-item .btn.sm:active { transform: translate(1px, 1px); box-shadow: 0 0 0 rgba(80, 52, 14, 0); }
+#panel .empty {
+  padding: 30px 0;
+  text-align: center;
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: rgba(105, 80, 46, .85);
+}
+
+/* ── 任务面板·书信纸（用户裁定 2026-10-27：任务清单使用每日复盘清单/精力恢复清单的书信样式） ──
+   纸面 = 统一纸纹变量 --paper-tex（配方与加浓缘由见文件末尾「纸纹统一」节）。
+   任务行 = rm-list li 书信行：平铺纸面、虚线分隔、名称棕墨楷体、时长如「今日明细」时间列、
+   消耗如右栏 val 数字（去胶囊徽标）；信头 = rm-head 同款：粗墨分隔线 + 楷体标题微倾。
+   ✓/✕ 大按钮与超时红点沿用「极简文字」裁定，不动。 */
+#panel {
+  background-image: var(--paper-tex);
+  /* 复盘信纸同款全套（用户裁定 2026-10-27）：纹理之外，撕角轮廓 + 纸色缘线 +
+     左右 inset 边缘阴影同 .rm-sheet；悬浮纵深改 filter drop-shadow
+     （clip-path 会把 box-shadow 外影裁掉，drop-shadow 沿撕角轮廓投影） */
+  border: none;
+  border-left: 1px solid rgba(135, 100, 50, .45);
+  border-right: 1px solid rgba(135, 100, 50, .45);
+  border-radius: 0;
+  box-shadow: inset 7px 0 12px -7px rgba(88, 58, 18, .38), inset -7px 0 12px -7px rgba(88, 58, 18, .38);
+  clip-path: polygon(
+    3.5% 0%, 62% .6%, 96% 0%, 100% 4%, 99.2% 30%, 100% 62%, 98.6% 92%, 96.5% 100%,
+    60% 99.4%, 26% 100%, 3% 99.6%, 0% 95%, .9% 68%, 0% 34%, 1.2% 6%
+  );
+  filter: drop-shadow(4px 6px 10px rgba(60, 40, 10, .30));
+}
+
+/* 信头（rm-head 同款） */
+#panel .panel-head {
+  border-bottom: 2px solid rgba(120, 88, 42, .4);
+  padding-bottom: 8px;
+}
+#panel .panel-head h1 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #4a3319;
+  transform: rotate(-.6deg);
+}
+
+/* 书信行（rm-list li 同款：平铺 + 虚线分隔 + 墨色） */
+#panel .task-item {
+  padding: 7px 10px;
+  min-height: 28px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed rgba(120, 90, 45, .35);
+  border-radius: 0;
+  margin-bottom: 0;
+  line-height: 1.4;
+}
+#panel .task-item:last-child { border-bottom: none; }
+#panel .task-item:hover {
+  transform: none;
+  border-color: rgba(120, 90, 45, .35);
+  background: rgba(255, 250, 235, .5);
+}
+#panel .task-item .t-title { font-size: 13px; font-weight: 700; color: #3f2c17; }
+#panel .task-item .t-dur {
+  display: inline;
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 400;
+  color: rgba(105, 80, 46, .8);
+}
+#panel .task-item .t-cost {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #4a3319;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── 纸纹统一（用户裁定 2026-10-27 13:55：「统一采用斜向褶皱光影 + 茶渍四斑 + 霉点细粒
+   + 28px 淡横格线（手账内页感）」）──
+   单一配方源 --paper-tex（加浓版，13:35 反馈定标：格线 .16/褶皱 .10/茶渍 .26–.16/霉点 .34–.24，
+   像素复测 grid_line_dark 5.9→22.6 一眼可辨），全部纸面共用：
+   复盘/周手账信纸 .rm-sheet、恢复清单 .rp-panel、信件卡/调节卡/时长卡、AI 推荐卡 .rec-ai-card、
+   任务面板 #panel（上方书信纸节同引此变量）。#toast 为瞬态小纸条，不入册。
+   本规则位于文件末尾：同特异度按序覆盖各表面原有的减弱版纹理。 */
+:root {
+  --paper-tex:
+    repeating-linear-gradient(104deg,
+      rgba(140, 105, 55, 0) 0 46px,
+      rgba(140, 105, 55, .10) 46px 52px,
+      rgba(255, 248, 226, .18) 52px 58px,
+      rgba(140, 105, 55, 0) 58px 104px),
+    radial-gradient(ellipse 74px 48px at 82% 10%, rgba(155, 115, 55, .26), transparent 70%),
+    radial-gradient(ellipse 56px 42px at 10% 66%, rgba(150, 110, 52, .22), transparent 70%),
+    radial-gradient(ellipse 84px 58px at 58% 94%, rgba(160, 120, 60, .18), transparent 72%),
+    radial-gradient(ellipse 40px 30px at 34% 30%, rgba(150, 112, 55, .16), transparent 70%),
+    radial-gradient(circle 2.5px at 24% 22%, rgba(135, 96, 46, .34), transparent 100%),
+    radial-gradient(circle 2px at 70% 40%, rgba(135, 96, 46, .30), transparent 100%),
+    radial-gradient(circle 2.5px at 44% 78%, rgba(135, 96, 46, .28), transparent 100%),
+    radial-gradient(circle 1.5px at 86% 58%, rgba(135, 96, 46, .28), transparent 100%),
+    radial-gradient(circle 2px at 14% 88%, rgba(135, 96, 46, .24), transparent 100%),
+    repeating-linear-gradient(to bottom, transparent 0 27px, rgba(115, 86, 42, 0.16) 27px 28px);
+}
+.rm-sheet,
+.rp-panel,
+.rec-ai-card,
+#slide-card,
+#adjust-card,
+#duration-card,
+#panel {
+  background-image: var(--paper-tex);
 }

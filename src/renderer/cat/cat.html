@@ -6,9 +6,10 @@
   </head>
   <body>
     <canvas id="stage"></canvas>
-    <div id="bubble"></div>
     <!-- 精力值 HUD：从 uiWin 原样迁移到桌宠下方（底部预留条带），悬浮显示。
-         DOM 在 canvas 之后 → 绘制在上层，滑条可交互；猫脚底线(374)在条带之上，互不遮挡。 -->
+         DOM 在 canvas 之后 → 绘制在上层，滑条可交互；猫脚底线(374)在条带之上，互不遮挡。
+         2026-10-27 用户裁决：档位徽标（emoji+「狂喜」等文字）清除；精力数字先删后恢复
+         （14:31 第二轮裁决：条左侧保留数字，滑条微调时半格精度需要读数）。 -->
     <div id="energy-hud">
       <span class="weather" id="hud-weather" role="button" title="刷新天气">🌤️</span>
       <span class="num" id="hud-num">7.0</span>
@@ -17,8 +18,13 @@
         <input type="range" id="hud-slider" min="0" max="10" step="0.5" value="7"
                aria-label="精力调节" />
       </span>
-      <span class="tier" id="hud-tier">平稳</span>
       <span class="adjust-badge" id="hud-adjust-badge" hidden>调节中 <b id="hud-adjust-count">7</b>s</span>
+      <!-- 快捷入口（v1.x dock 回归）：任务面板 / 精力恢复 —— 与猫右键菜单同一主进程入口。
+           放在角标之后：调节倒计时出现时由兄弟选择器隐藏本组，胶囊总宽不超 360px 窗宽。 -->
+      <span class="hud-actions">
+        <button class="hud-btn" id="hud-panel" title="任务面板" aria-label="任务面板">🎛️</button>
+        <button class="hud-btn" id="hud-recovery" title="精力恢复" aria-label="精力恢复">⚡</button>
+      </span>
     </div>
     <script src="cat.js"></script>
   </body>

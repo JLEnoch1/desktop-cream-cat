@@ -43,9 +43,9 @@ const EMOTION_PARAMS: Record<BaseEmotion, {
 const PULSE_PARAMS: Record<PulseReaction, Partial<{
   mouthCurve: number; tremble: number; eyeOpen: number;
 }>>;  // ⚠️ **当前仍是覆盖语义**（buildParams 内三处 `PULSE_PARAMS[..] ?? EMOTION_PARAMS[..]`），
-      //    pulse 会**抹掉** base 的档位差异。M2/T4 将改为 `PULSE_OFFSETS` + `pulseModulation(tier)`
-      //    加权叠加（DESIGN.md §4.3 矛盾 C）。⚠️ Q1：modulation 应在低精力区**内部**细分，
-      //    不跨全量程递减，否则 pulse 在 low 档趋近 0 = 功能被关掉。勿自改 PULSE_THRESHOLD=3。
+      //    已改为 `PULSE_OFFSETS` + `pulseIntensity(reaction, energy)`（契约层 emotion-pulse-contract.md）
+      //    加权叠加（DESIGN.md §4.3）。🔴 数值语义已从「绝对目标值」改为「相对 base 的偏移量」。
+      //    pulse 全档激活（门槛已废除），勿在这里加任何能量阈值比较。
 
 /* ── 🆕 v1.2 姿态解算：导出的纯函数（pet.ts 里少数可单测的边界，见 tests/pose.test.ts） ── */
 
@@ -74,7 +74,7 @@ export function resolveEarPose(p: { mouthCurve: number; tremble: number; eyeOpen
 const PETTING_WINDOW_MS = 2500;   // 连点判定窗口
 const PETTING_CLICKS   = 3;       // 满 3 次 → 呼噜（DESIGN.md [问题清单 §5.3](known-issues.md) v1.1 裁决）
 const PETTING_BOOST_MS = 2000;    // 呼噜加成时长，线性衰减
-const INJURY_FLY_MS = 350; const INJURY_HOLD_MS = 8000; const INJURY_RETURN_MS = 500;
+const PRATFALL_FLY_MS = 350; const PRATFALL_HOLD_MS = 8000; const PRATFALL_RETURN_MS = 500;
 // 🔴 旧常量 RAPID_CLICK_WINDOW_MS / RAPID_CLICK_COUNT（连点→甩墙）**已删除**，禁止复活（R10）。
 
 export class PetRenderer {
@@ -86,7 +86,7 @@ export class PetRenderer {
   applyEmotion(state: EmotionState): void;
     // ⟨主路径：AppState 推送时调用，设置 target 与 overlay/pulse/pulseActive⟩
   setPreview(energy: number): void;
-    // ⟨滑块预览：按投影精力实时驱动表情；pulseActive = energy < PULSE_THRESHOLD，
+    // ⟨滑块预览：按投影精力实时驱动表情；pulseActive 恒 true（门槛已废除），
     //   未激活时 pulse 传 'none'⟩
   clearPreview(state: EmotionState): void;      // ⟨等价于 applyEmotion(state)⟩
   applyOverlay(overlay: WeatherOverlay): void;
@@ -98,18 +98,24 @@ export class PetRenderer {
     //   pettingUntil = now + PETTING_BOOST_MS，额外 10 颗 hue=38 暖金粒子。
     //   呼噜表现：嘴型 +0.6、眯眼（下限 0.25，"醒着且享受"）、低幅 purr 震颤
     //   （与焦虑 tremble 取 max 而非覆盖）、2s 线性衰减。**不落库**。⟩
-  injure(): void;
-    // 🔴 **2026-10-22 裁决：删除并从领域层除名**（DESIGN.md §5.4 / TASKS.md T12）。
-    //   当前实现：三段相位机 fly(350ms) → hold(8000ms) → return(500ms)，X 眼 + 绷带 +
-    //   旋转 90° 贴墙 + 弹性复位；触发时打断呼噜并清空 clickTimes。
-    //   **无任何调用方**（`grep -rn 'injure()' src/` 仅定义处与注释）。
-    //   裁决处置（T12 待实现）：本方法删除，甩墙降级为 renderer 层 `pratfall()` 纯喜剧彩蛋，
-    //   **永不**由任何用户行为序列触发；"累瘫"改由 base 低档表达。
-    //   ⚠️ `pratfall()` 尚不存在（`grep -rn pratfall src/` = 0），是 T12 的计划改名。
-    //   ⚠️ 源码注释仍写"未来若要接线，触发源必须是领域事件"——该预留已被裁决否决，
-    //   属**悬空许可**，登记于 [问题清单 §5.1](known-issues.md)（T0/v1.4 只改 .md，不动源码）。
-    //   📌 DESIGN.md 红线 R10/R11 措辞已于 **v1.4** 修订（用户 11:49 批准）："仅可由领域事件
-    //   触发"的悬空许可已从契约消除，R11 现为"跌倒态永不由任何用户行为序列触发"。
+  pratfall(): void;
+    // ✅ **已交付（main `1557490`）**：由 `injure()` 除名改名而来。纯喜剧彩蛋，**仅**由强意图手势触发：
+    //   dragMoveBy 采样 {x,y,t} → dragEnd 调 `isPratfallGesture()` 判定（拖拽超距
+    //   PRATFALL_DRAG_MIN_PX=240 路径总长 + 3s 内方向反转 ≥3 次）；单击/连点/普通拖拽物理上不可命中（R10）。
+    //   五段时序 fly(350)→lie(15000)→groom(7000)→nuzzle(5000)→return(500)，总和 ≤ PRATFALL_TOTAL_MAX_MS=90_000；
+    //   PRATFALL_COOLDOWN_MS=600_000 冷却。视觉：呆滞放空脸 + 一根胡须折弯（`drawWhiskers()` 常驻图层）+
+    //   额头绷带冒爱心（十字贴布/X 眼已删除）。不落库、不改精力、永不接线领域事件。
+  /* 导出的模块级纯函数（node 可单测）： */
+  isPratfallGesture(samples: readonly PratfallGestureSample[]): boolean;
+  buildRenderParams(energy, base, pulse, pulseActive): RenderParams;
+  resolveProneVariant(energy): { lidDroop: number; meltSquish: number; breathScale: number };
+  coatPatternParams(sat, lum): { opacity: number; contrast: number };
+  irisTone(energy): { hue: number; sat: number; green: number };
+  tailLagAngle(t, speed, amp, s): number;   // F 次级运动：尾尖相位延迟（确定性）
+  earTwitch(t, side): number;               // F 次级运动：耳微颤 ±0.015rad
+    // resolveProneVariant = base 低档趴窝变体（LOW_TIER_PRONE_MAX=2.5，G5/Q10 待确认，main `e23845e`）；
+    // coatPatternParams / irisTone = T13 金渐层花纹 + 虹膜迁移（**由 sat/lum 派生，禁独立常量**，
+    //   main `14c0bc2`/`d59d47d`/`3efdb0b`）；调制契约见 [emotion-pulse-contract.md](emotion-pulse-contract.md)。
   dragStart(): void; dragMoveBy(dx: number, dy: number): void; dragEnd(): void;
     // ⟨黏性形变（dragStretch / dragVel）。🔴 R10：拖动路径**不 push clickTimes**，
     //   与 poke() 是两条独立入口，拖动永不计入连点。⟩
@@ -136,13 +142,15 @@ export class PetRenderer {
   private clickTimes: number[];    // 🆕 连点计数（PETTING_WINDOW_MS 内的时间戳）
   private tailTip = { x: 0, y: 0 };// 🆕 尾梢画布坐标，petBounds() 用它把尾巴纳入命中区
   private pettingUntil = 0;        // 🆕 呼噜加成到期时刻（performance.now 基准）；0 = 无加成
-  private injury: { phase: 'fly'|'hold'|'return'; start: number; dir: 1|-1 } | null;
+  private pratfallState: { phase: 'fly'|'lie'|'groom'|'nuzzle'|'return'; start: number; dir: 1|-1 } | null;
   private particles: { x,y,vx,vy,life,maxLife,hue,size }[];
   // ❌ 已删除：bubbleText / bubbleUntil（R1 气泡系统）
 
   private buildParams(energy, base, pulse, pulseActive): RenderParams;
-    // ⟨BASE_TIERS 按 emotion 查档（未命中回退 tierFor(energy)）；
-    //   eyeOpen/mouthCurve/tremble 取 PULSE_PARAMS ?? EMOTION_PARAMS（**覆盖**语义，见上）⟩
+    // ⟨类内包装，委托模块级纯函数 `buildRenderParams()`：**偏移语义**——
+    //   base + PULSE_OFFSETS × `pulseIntensity(reaction, energy)` 加权叠加（契约层），
+    //   再叠 `resolveProneVariant()` 低档三通道（lidDroop/meltSquish/breathScale）；各通道独立钳制。
+    //   调制契约见 [emotion-pulse-contract.md](emotion-pulse-contract.md)⟩
   private loop: () => void;
     // ⟨RAF 回调。插值系数 k = 1 - exp(-dt*6)（帧率无关近似）；
     //   眨眼按 blink * (0.7 + random*0.6) 秒随机调度；
@@ -152,8 +160,10 @@ export class PetRenderer {
     //   影子 → pulse 光环 → **尾巴 drawTail()（身体后图层）** → 记录 this.tailTip
     //   → 身体：ctx.translate(px,py) / rotate(injRot) / scale(squish×breath) 内
     //       **先 drawEar() ×2（基部被头部轮廓遮住，只露三角尖）**
-    //       → bodyGrad 填充团子轮廓 → 高光
-    //       → 脸：drawEyes ×2 + drawMouth + 绷带[若 injured] + 腮红[开心且未受伤]
+    //       → bodyGrad 填充团子轮廓
+    //       → **drawCoatPattern()（T13 花纹，裁剪进身体轮廓）+ drawFurAndLight()（F 三灯位/毛边/噪点）**
+    //       → 高光
+    //       → 脸：drawWhiskers + drawEyes ×2（虹膜 irisTone + 黑眼线 + 双高光）+ drawMouth + 绷带[若 pratfalling] + 腮红[开心且未跌倒]
     //   → 天气 overlay（锚定 py - bodyR*1.75）→ 粒子
     //   bodyR = min(52 + energy*0.6, H*0.32)（体型随画布高度自适应，小窗不裁切 overlay）
     //   bodyGrad 三段均用 p.lum（R7）：min(92, L+14) / L / max(34, L-16)，末段 sat 也降 12（下限 20）
@@ -172,15 +182,15 @@ export class PetRenderer {
     //      **单测全绿但截图里整条尾巴塌成水平鱼鳍** ⇒ 改加性扰动（根 0.25× / 梢 0.45×）。
     //   造型：梢部恒定上勾 0.55rad 成「?」尾钩（不随情绪归零）；
     //   垂尾（pose.lift<0）贴地钳制 floorY = bodyR*0.22，不穿影子线。
-  private drawEyes(ctx, x, y, bodyR, p, now, injured = false): void;
+  private drawEyes(ctx, x, y, bodyR, p, now, pratfalling = false): void;
     // ⟨open<0.15 画闭眼弧线（开心向上弯/累时向下垂）；否则睁眼+眼神光；
     //   eyeOpen<0.7 叠加上眼皮遮罩表现疲惫（遮罩参数化读 p.lum）；
-    //   injured=true → 眩晕 X 眼（🔴 已裁决改"呆滞放空"，见 T12）；
+    //   pratfalling=true → 眩晕 X 眼（🔴 已裁决改"呆滞放空"，见 T12）；
     //   ⚠️ 眼色当前为固定 `#2b2b3a`，**无绿色** ⇒ T13 绿眼睛是新增工作⟩
-  private drawMouth(ctx, x, y, bodyR, p, injured = false): void;
-    // ⟨curve>0.65 张嘴大笑+舌头；否则二次贝塞尔由 curve 控制弯向；injured → 波浪嘴⟩
+  private drawMouth(ctx, x, y, bodyR, p, pratfalling = false): void;
+    // ⟨curve>0.65 张嘴大笑+舌头；否则二次贝塞尔由 curve 控制弯向；pratfalling → 波浪嘴⟩
   private drawBandage(ctx, bodyR, p): void;
-    // ⟨额头斜贴绷带 + 侧脸十字贴布。🔴 仅 injure() 路径调用，而 injure() 已裁决除名
+    // ⟨额头斜贴绷带 + 侧脸十字贴布。🔴 仅 pratfall() 路径调用，而 pratfall() 已裁决除名
     //   ⇒ 本方法随 T12 一并处置（"累瘫"改由 base 低档表达，不需绷带）⟩
   private drawPulseAura(x, y, bodyR, t): void;
     // ⟨6 种 pulse 各有专属光环颜色；anxious💧 / restless〰️ / grateful✨ 附加符号⟩

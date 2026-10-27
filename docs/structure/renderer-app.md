@@ -107,7 +107,7 @@ function setupDrag(): void;
 // ⟨pet-wrap mousedown(**仅 button 0**) → 命中校验（只有落在 petBounds() 实际主体内才启动）
 //   → dragStart；window mousemove → dragMove；mouseup → endDrag(treatAsClick)。
 //   **moved=false 时视为点击：pet.poke()** —— 压平 + 4 粒子；连点满 3 次/2500ms → 呼噜。
-//   🔴 R10：此处**永不触发受伤**（源码注释明写"甩墙只能由 pet.injure() 显式调用，当前无调用方"）。
+//   🔴 R10：此处**永不触发跌倒**（源码注释明写"甩墙只能由 pet.pratfall() 显式调用，当前无调用方"）。
 //   ⚠️ 点击路径**不调 emotionSummary**（旧存根写"poke() + emotionSummary 气泡"已过期，
 //      气泡系统 R1 已删；emotionSummary 现仅供托盘 tooltip）⟩
 
@@ -236,7 +236,7 @@ function applyState(s: AppState): void;
 //   ③b adjustWindow diff → 调节窗口的进度条/徽章（#hud-adjust-badge / #hud-adjust-count）
 //   ④ renderRecoveries / renderTasks / renderRecommendations
 //   ⑤ 晨间基线：**卡片本身就是问候，不再叠加文字提示**（源码 :1228 注释）
-//   ⑥ 精力跨过 PULSE_THRESHOLD 向下 → **toast** 3200ms
+//   ⑥ 精力跨过 `LOW_ENERGY_TOAST_AT`(3) 向下（常量在 app.ts 本地定义，与已废除的 pulse 门槛无关） → **toast** 3200ms
 //      `电量低于 3 分了，要不要休息一下？`（源码 :1230 注释明写"仅 toast，不弹文字气泡"）
 //      ❌ 旧存根的"问候气泡 5s"/"低电量气泡 4.2s"时长均已不存在⟩
 

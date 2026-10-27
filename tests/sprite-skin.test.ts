@@ -11,6 +11,7 @@
  * 步内交叉溶解双层/换帧点连续/速度同步钳制/状态边界相位重置）、N 帧循环
  * （着地帧 bob≈0、过渡帧峰值）、小步扫描换帧无跳变；
  * 另补：表情重入从头播、expressionNames、状态回退链、缺 idle 拒绝；
+ * 视频步态环合并（desktop-pet 未提交变更）：exitT 边界渐出、转身溶解、subX 亚像素补偿；
  * 融合扩展：setOverlay 天气挂件、setPulse 脉冲光晕。
  *
  * node:test 顶层 test 按注册顺序串行执行，多个 skin 共享同一 ctx/drawn 桩
@@ -45,8 +46,9 @@ class FakeImage {
 }
 const ImageCtor = FakeImage as unknown as new () => HTMLImageElement;
 
-/** ctx 记录桩：drawn = drawImage 的图像 tag 序列；calls = 各方法调用计数 */
+/** ctx 记录桩：drawn = drawImage 的图像 tag 序列；calls = 各方法调用计数；translated = translate 参数序列 */
 const drawn: string[] = [];
+const translated: [number, number][] = [];
 const calls: Record<string, number> = {};
 function bump(name: string): void {
   calls[name] = (calls[name] ?? 0) + 1;
@@ -63,7 +65,10 @@ const ctxRaw = {
   lineCap: '',
   save(): void { bump('save'); },
   restore(): void { bump('restore'); },
-  translate(): void { bump('translate'); },
+  translate(x?: number, y?: number): void {
+    bump('translate');
+    translated.push([x ?? 0, y ?? 0]);
+  },
   rotate(): void { bump('rotate'); },
   scale(): void { bump('scale'); },
   drawImage(img: unknown): void {
@@ -111,7 +116,7 @@ const assets2: SkinAssetsV2 = {
     idle: { frames: ['i'] },
     walk: {
       frames: ['w1', 'w2'],
-      anim: { interval: [0.2, 0.2], refSpeed: 46, crossfade: 0.5, entryT: 0.05, stateXfade: 0.1 },
+      anim: { interval: [0.2, 0.2], refSpeed: 46, crossfade: 0.5, entryT: 0.05, exitT: 0.3, stateXfade: 0.1 },
     },
   },
   expressions: {},
@@ -429,4 +434,39 @@ test('sprite-skin: 16) setPulse：grateful×1 → draw 调 createRadialGradient�
   assert.equal(diff(b, 'createRadialGradient'), 1);
 
   skin.setPulse('none', 0); // 还原
+});
+
+/* ─────────── 视频步态环合并（desktop-pet 未提交变更）：exitT / 转身溶解 / subX ─────────── */
+
+test('sprite-skin: 17) exitT：离开 walk 的边界溶解用 prevState 的 exitT(0.3) 而非 stateXfade(0.1)', () => {
+  // skin2 在 test 10 末尾处于 walk（lastBody=walk 帧，prevState='walk'）
+  t2 += 0.01;
+  skin2.draw(pose, t2, info('idle', 0.01)); // 切换发生，快照建立（dur=exitT=0.3）
+  t2 += 0.14;
+  drawn.length = 0;
+  skin2.draw(pose, t2, info('idle', 0.14)); // 快照累计 0.15s：> stateXfade(0.1)，< exitT(0.3)
+  assert.ok(drawn[0] === 'w1' || drawn[0] === 'w2', 'exitT 内旧 walk 帧应仍在淡出: ' + drawn);
+  t2 += 0.2;
+  drawn.length = 0;
+  skin2.draw(pose, t2, info('idle', 0.2)); // 累计 0.35s > exitT
+  assert.ok(!drawn.includes('w1') && !drawn.includes('w2'), 'exitT 结束后只剩 idle 帧: ' + drawn);
+});
+
+test('sprite-skin: 18) 转身溶解：同状态下 face 翻转触发边界快照（消除镜像 pop）', () => {
+  const poseR: SkinPose = { face: 1, rot: 0 };
+  for (let i = 0; i < 3; i++) {
+    t2 += 0.05;
+    skin2.draw(poseR, t2, info('idle', 0.05));
+  }
+  drawn.length = 0;
+  t2 += 0.01;
+  skin2.draw({ face: -1, rot: 0 }, t2, info('idle', 0.01));
+  assert.ok(drawn.length >= 2, '转身应出现旧朝向淡出+新帧两层: ' + drawn);
+});
+
+test('sprite-skin: 19) subX 亚像素补偿：作为绘制层第一个平移量传入', () => {
+  translated.length = 0;
+  t2 += 0.01;
+  skin2.draw({ face: 1, rot: 0 }, t2, { state: 'idle', dt: 0.01, stateT: 0, squashT: 0, air: 0, subX: 0.4 });
+  assert.deepEqual(translated[0], [0.4, 0], 'subX 应平移画布: ' + JSON.stringify(translated[0]));
 });
